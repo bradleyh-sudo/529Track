@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>529Track</title>
+<meta name="description" content="529 education expense tracker"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="529Track"/>
+<meta name="theme-color" content="#1C2B3A"/>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%231C2B3A'/%3E%3Ctext x='90' y='115' font-size='72' text-anchor='middle' font-family='Georgia,serif' fill='%235B9BD5' font-weight='bold'%3E529%3C/text%3E%3C/svg%3E"/>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>*{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;background:#1C2B3A;}body{-webkit-tap-highlight-color:transparent;}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const SK = { EXP:"529t-exp", USR:"529t-usr", SET:"529t-set", SES:"529t-ses", INV:"529t-inv", ACCTS:"529t-accts" };
+async function load(key) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+async function save(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) { console.error(e); }
+}
+
+const ROLES = [
+  { id:"viewer", label:"Viewer",        desc:"View expenses only" },
+  { id:"adder",  label:"Contributor",   desc:"Add expenses" },
+  { id:"editor", label:"Editor",        desc:"Add, delete own, mark reimbursed" },
+  { id:"admin",  label:"Administrator", desc:"Full access + manage users & settings" },
+];
+const RI = { admin:"👑", editor:"✏️", adder:"➕", viewer:"👁" };
+const can = (u, a) => {
+  if (!u) return false;
+  if (a==="view")           return true;
+  if (a==="add")            return ["adder","editor","admin"].includes(u.role);
+  if (a==="delete")         return ["editor","admin"].includes(u.role);
+  if (a==="markReimbursed") return ["editor","admin"].includes(u.role);
+  if (a==="manageUsers")    return u.role==="admin";
+  return false;
+};
+
+const CATS = ["Tuition & Fees","Books & Supplies","Housing & Meals","Technology","Transportation","Special Needs","Other"];
+const CC = {"Tuition & Fees":"#2563EB","Books & Supplies":"#7C3AED","Housing & Meals":"#059669","Technology":"#D97706","Transportation":"#DC2626","Special Needs":"#DB2777","Other":"#6B7280"};
+const f$ = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n);
+const fD = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
+const td = () => new Date().toISOString().split("T")[0];
+const hsh = s => [...s].reduce((a,c)=>Math.imul(31,a)+c.charCodeAt(0)|0,0).toString(36);
+const ini = n => n.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
+const mkTok = () => Array.from({length:24},()=>"abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random()*36)]).join("");
+
+function mkInvLink(token,name,email,role,acct) {
+  return window.location.href.split("#")[0]+"#invite="+btoa(JSON.stringify({token,name,email,role,accountName:acct}));
+}
+function readInvHash() {
+  try { const h=window.location.hash; if(!h.startsWith("#invite="))return null; return JSON.parse(atob(h.slice(8))); } catch { return null; }
+}
+function openInvEmail(inv,acctName,sender) {
+  const link=mkInvLink(inv.token,inv.name,inv.email,inv.role,acctName);
+  const sub=encodeURIComponent(`You're invited to join ${acctName} on 529Track`);
+  const body=encodeURIComponent(`Hi ${inv.name},\n\n${sender} has invited you to join ${acctName} on 529Track.\n\nCreate your account:\n${link}\n\nRole: ${ROLES.find(r=>r.id===inv.role)?.label}\nExpires in 7 days.\n\n— 529Track`);
+  window.open(`mailto:${inv.email}?subject=${sub}&body=${body}`,"_self");
+}
+
+function dlCSV(exps) {
+  const h=["Date","Description","Payee","Category","Amount","Added By","Notes","Reimbursed","Reimbursed From","Reimbursed Date","Receipt"];
+  const rows=exps.map(e=>[e.date,`"${(e.description||"").replace(/"/g,'""')}"`,`"${(e.payee||"").replace(/"/g,'""')}"`,e.category,e.amount.toFixed(2),`"${(e.addedBy||"").replace(/"/g,'""')}"`,`"${(e.notes||"").replace(/"/g,'""')}"`,e.reimbursed?"Yes":"No",`"${(e.reimbursedFrom||"").replace(/"/g,'""')}"`,e.reimbursedDate||"",`"${(e.receiptName||"").replace(/"/g,'""')}"`]);
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([[h,...rows].map(r=>r.join(",")).join("\n")],{type:"text/csv"})); a.download=`529-expenses-${td()}.csv`; a.click();
+}
+
+const SAMPLE=[
+  {id:1,date:"2025-08-15",description:"Fall Semester Tuition",payee:"State University",amount:4200,category:"Tuition & Fees",addedBy:"Setup",addedById:"0",notes:"Main tuition payment",reimbursed:true,reimbursedDate:"2025-08-20",reimbursedFrom:"Vanguard 529 – #4821",receiptName:"tuition_fall2025.pdf"},
+  {id:2,date:"2025-08-22",description:"Calculus Textbook",payee:"Amazon",amount:187.5,category:"Books & Supplies",addedBy:"Setup",addedById:"0",notes:"Required for MATH 301",reimbursed:false,reimbursedDate:null,reimbursedFrom:"",receiptName:"amazon_receipt.jpg"},
+  {id:3,date:"2025-09-01",description:"Dorm Room & Board",payee:"University Housing",amount:2100,category:"Housing & Meals",addedBy:"Setup",addedById:"0",notes:"Monthly housing + meal plan",reimbursed:false,reimbursedDate:null,reimbursedFrom:"",receiptName:null},
+];
+
+// ─── Shared styles ────────────────────────────────────────────────
+const G = {
+  page: { fontFamily:"'Source Sans 3',sans-serif", minHeight:"100vh", background:"#1C2B3A", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start", padding:"32px 24px" },
+  logo: { fontFamily:"Georgia,serif", fontSize:40, fontWeight:700, color:"#F5F4F0", marginBottom:4, letterSpacing:-1 },
+  logoSpan: { color:"#5B9BD5" },
+  tagline: { fontSize:13, color:"#7A9BB5", marginBottom:32 },
+  card: { background:"white", borderRadius:16, padding:"28px 24px", width:"100%", maxWidth:380, boxShadow:"0 8px 40px rgba(0,0,0,0.3)" },
+  cardTitle: { fontFamily:"Georgia,serif", fontSize:22, color:"#1C2B3A", marginBottom:6, fontWeight:700 },
+  cardSub: { fontSize:13, color:"#9CA3AF", marginBottom:22 },
+  label: { display:"block", fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:".8px", color:"#6B7280", marginBottom:5 },
+  input: { display:"block", width:"100%", background:"#F9FAFB", border:"1.5px solid #D1D5DB", borderRadius:8, padding:"12px 14px", fontSize:15, color:"#1C2B3A", outline:"none", marginBottom:14, fontFamily:"'Source Sans 3',sans-serif" },
+  btnBlue: { display:"block", width:"100%", background:"#2563EB", color:"white", border:"none", borderRadius:10, padding:"14px", fontSize:16, fontWeight:700, cursor:"pointer", fontFamily:"'Source Sans 3',sans-serif", marginTop:4 },
+  btnGhost: { display:"block", width:"100%", background:"none", border:"1.5px solid #D1D5DB", borderRadius:10, padding:"12px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"'Source Sans 3',sans-serif", color:"#374151", marginTop:10 },
+  link: { color:"#2563EB", cursor:"pointer", fontWeight:600, fontSize:13 },
+  err: { background:"#FEF2F2", border:"1.5px solid #FCA5A5", borderRadius:8, padding:"11px 13px", fontSize:13, color:"#DC2626", marginBottom:14 },
+  ok:  { background:"#F0FDF4", border:"1.5px solid #86EFAC", borderRadius:8, padding:"11px 13px", fontSize:13, color:"#166534", marginBottom:14, textAlign:"center" },
+  info:{ background:"#EFF6FF", border:"1px solid #BFDBFE", borderRadius:8, padding:"10px 13px", fontSize:12, color:"#1E40AF", marginBottom:12 },
+  links: { marginTop:18, display:"flex", flexDirection:"column", gap:10, alignItems:"center" },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════════
+function App() {
+  // We always start on "login" — no routing to a different first screen
+  const [page,        setPage]        = useState("login"); // login | forgot | register | setup | invite | app
+  const [ready,       setReady]       = useState(false);   // true once storage has loaded
+  const [currentUser, setCurrentUser] = useState(null);
+  const [users,       setUsers]       = useState([]);
+  const [expenses,    setExpenses]    = useState([]);
+  const [invites,     setInvites]     = useState([]);
+  const [accts,       setAccts]       = useState([]); // 529 accounts
+  const [selectedIds, setSelectedIds] = useState(new Set()); // bulk selection
+  const [showBulk,    setShowBulk]    = useState(false);
+  const [settings,    setSettings]    = useState({accountName:"My 529 Account",allowSelfRegister:true,requireApproval:false});
+  const [view,        setView]        = useState("dash");
+  const [detailId,    setDetailId]    = useState(null);
+  const [fSt,         setFSt]         = useState("all");
+  const [fCt,         setFCt]         = useState("all");
+  const [form,        setForm]        = useState({date:td(),description:"",payee:"",amount:"",category:"Tuition & Fees",notes:"",receiptName:null});
+  const [succ,        setSucc]        = useState(false);
+  const [atab,        setAtab]        = useState("users");
+  const [showInv,     setShowInv]     = useState(false);
+  const [toast,       setToast]       = useState(null);
+  const fref = useRef();
+
+  const showToast = m => { setToast(m); setTimeout(()=>setToast(null),2000); };
+
+  // Load storage in background — login page shows immediately while this runs
+  useEffect(()=>{
+    (async()=>{
+      const invData = readInvHash();
+      const [u,e,s,sess,inv,ac] = await Promise.all([load(SK.USR),load(SK.EXP),load(SK.SET),load(SK.SES),load(SK.INV),load(SK.ACCTS)]);
+      const lu=u||[], le=e||[], ls=s||{accountName:"My 529 Account",allowSelfRegister:true,requireApproval:false}, li=inv||[], la=ac||[];
+      setUsers(lu); setExpenses(le); setSettings(ls); setInvites(li); setAccts(la);
+      setReady(true);
+
+      // Only navigate away from login if we have a clear reason to
+      if (invData) {
+        setPage("invite");
+      } else if (sess && lu.length > 0) {
+        const found = lu.find(x=>x.id===sess.id);
+        if (found) { setCurrentUser(found); setPage("app"); }
+        // else: bad session, stay on login
+      }
+      // No users yet? Stay on login — setup will trigger when they click Log In
+    })();
+  },[]);
+
+  const saveU = u  => { setUsers(u);    save(SK.USR,u); };
+  const saveE = e  => { setExpenses(e); save(SK.EXP,e); };
+  const saveS = s  => { setSettings(s); save(SK.SET,s); };
+  const saveI = iv => { setInvites(iv); save(SK.INV,iv); };
+  const saveA = a  => { setAccts(a);   save(SK.ACCTS,a); };
+
+  const login = user => { setCurrentUser(user); save(SK.SES,{id:user.id}); setPage("app"); };
+  const logout = () => { setCurrentUser(null); save(SK.SES,null); setPage("login"); setView("dash"); };
+
+  // ── Invites ──────────────────────────────────────────────────────
+  const createInv = (name,email,role) => {
+    const inv={id:Date.now(),token:mkTok(),name,email,role,createdBy:currentUser.name,createdAt:td(),expiry:new Date(Date.now()+7*864e5).toISOString(),used:false};
+    saveI([...invites,inv]); openInvEmail(inv,settings.accountName,currentUser.name); return inv;
+  };
+  const acceptInv = (token,name,email,role,pw) => {
+    saveI(invites.map(i=>i.token===token?{...i,used:true}:i));
+    const nu={id:Date.now(),name,email:email.toLowerCase().trim(),passwordHash:hsh(pw),role,status:"active",createdAt:td(),invitedBy:"admin"};
+    saveU([...users,nu]); window.history.replaceState(null,"",window.location.pathname); login(nu);
+  };
+
+  // ── Expenses ─────────────────────────────────────────────────────
+  const tot=expenses.reduce((s,e)=>s+e.amount,0);
+  const rtot=expenses.filter(e=>e.reimbursed).reduce((s,e)=>s+e.amount,0);
+  const filt=expenses.filter(e=>{
+    const sm=fSt==="all"||(fSt==="reimbursed"&&e.reimbursed)||(fSt==="pending"&&!e.reimbursed);
+    return (sm) && (fCt==="all"||e.category===fCt);
+  });
+  const catBd=CATS.map(cat=>({cat,amt:expenses.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0)})).filter(x=>x.amt>0);
+  const detExp=expenses.find(e=>e.id===detailId);
+
+  const addExp=()=>{
+    if(!form.description||!form.amount||!form.date)return;
+    const e={...form,id:Date.now(),amount:parseFloat(form.amount),addedBy:currentUser.name,addedById:currentUser.id,reimbursed:false,reimbursedDate:null,reimbursedFrom:""};
+    saveE([e,...expenses]); setForm({date:td(),description:"",payee:"",amount:"",category:"Tuition & Fees",notes:"",receiptName:null});
+    setSucc(true); setTimeout(()=>{setSucc(false);setView("list");},1400);
+  };
+  const delExp=(id)=>{saveE(expenses.filter(e=>e.id!==id));setView("list");};
+  const updExp=(id,p)=>saveE(expenses.map(e=>e.id===id?{...e,...p}:e));
+  const markR=(id,from,date)=>updExp(id,{reimbursed:true,reimbursedFrom:from,reimbursedDate:date||td()});
+  const unmkR=(id)=>updExp(id,{reimbursed:false,reimbursedFrom:"",reimbursedDate:null});
+
+  // ════════════════════════════════════════════════════════════════
+  // PAGE: LOGIN — always the first thing shown
+  // ════════════════════════════════════════════════════════════════
+  if (page==="login") return (
+    <LoginPage
+      users={users}
+      ready={ready}
+      settings={settings}
+      onLogin={user => {
+        login(user);
+      }}
+      onSetup={() => setPage("setup")}
+      onForgot={() => setPage("forgot")}
+      onRegister={settings.allowSelfRegister ? ()=>setPage("register") : null}
+    />
+  );
+
+  if (page==="forgot")   return <ForgotPage   users={users} onSave={saveU} onBack={()=>setPage("login")}/>;
+  if (page==="register") return <RegisterPage users={users} settings={settings} onSave={saveU} onBack={()=>setPage("login")}/>;
+
+  if (page==="setup") return (
+    <SetupWizard onDone={(admin,exps,s)=>{ saveU([admin]); saveE(exps); saveS(s); login(admin); }}/>
+  );
+
+  if (page==="invite") {
+    const invData=readInvHash();
+    const stored=invites.find(i=>i.token===invData?.token);
+    return <InviteAcceptPage inv={invData} stored={stored} onAccept={acceptInv} onBack={()=>{window.history.replaceState(null,"",window.location.pathname);setPage("login");}}/>;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // PAGE: APP
+  // ════════════════════════════════════════════════════════════════
+  const pendInvs=invites.filter(i=>!i.used);
+  const CSS=`
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;500;600&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0;}body{background:#F5F4F0;}
+    .app{font-family:'Source Sans 3',sans-serif;background:#F5F4F0;min-height:100vh;}
+    .header{background:#1C2B3A;padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:52px;position:sticky;top:0;z-index:50;}
+    .logo{font-family:'Playfair Display',serif;color:#F5F4F0;font-size:19px;font-weight:700;}.logo span{color:#5B9BD5;}
+    .nav{display:flex;gap:2px;flex:1;justify-content:center;}
+    .nb{background:none;border:none;color:#A0AEC0;font-family:'Source Sans 3',sans-serif;font-size:12px;padding:7px 10px;border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+    .nb:hover{background:rgba(255,255,255,.08);color:#F5F4F0;}.nb.on{background:rgba(91,155,213,.2);color:#5B9BD5;}
+    .user-area{display:flex;align-items:center;gap:7px;flex-shrink:0;}
+    .avatar{width:28px;height:28px;border-radius:50%;background:#2D4256;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#5B9BD5;border:2px solid #3D5A6E;}
+    .rb{font-size:10px;padding:2px 6px;border-radius:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;}
+    .rb-admin{background:rgba(245,158,11,.15);color:#D97706;}.rb-editor{background:rgba(91,155,213,.15);color:#5B9BD5;}.rb-adder{background:rgba(5,150,105,.15);color:#059669;}.rb-viewer{background:rgba(107,114,128,.15);color:#6B7280;}
+    .sign-out{background:none;border:1px solid rgba(255,255,255,.12);color:#A0AEC0;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;font-family:'Source Sans 3',sans-serif;}
+    .sign-out:hover{border-color:#DC2626;color:#FCA5A5;}
+    .wrap{max-width:900px;margin:0 auto;padding:0 14px 60px;}
+    .sg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0 14px;}
+    .sc{background:white;border-radius:11px;padding:16px 18px;border:1px solid #E8E6E1;}
+    .slbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#9CA3AF;margin-bottom:6px;}
+    .sv{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#1C2B3A;}.sv.am{color:#D97706;}.sv.gn{color:#059669;}
+    .ssub{font-size:11px;color:#9CA3AF;margin-top:2px;}
+    .sh{display:flex;justify-content:space-between;align-items:center;margin:18px 0 11px;flex-wrap:wrap;gap:7px;}
+    .sht{font-family:'Playfair Display',serif;font-size:19px;color:#1C2B3A;}
+    .hd-acts{display:flex;gap:7px;align-items:center;}
+    .add-btn{background:#1C2B3A;color:white;border:none;border-radius:8px;padding:8px 15px;font-family:'Source Sans 3',sans-serif;font-size:12px;font-weight:600;cursor:pointer;}.add-btn:hover{background:#2D4256;}
+    .dl-btn{background:white;color:#1C2B3A;border:1.5px solid #E8E6E1;border-radius:8px;padding:7px 13px;font-family:'Source Sans 3',sans-serif;font-size:12px;font-weight:600;cursor:pointer;}.dl-btn:hover{border-color:#1C2B3A;}
+    .prog-wrap{background:white;border:1px solid #E8E6E1;border-radius:11px;padding:14px 18px;margin-bottom:14px;}
+    .prog-lbl{display:flex;justify-content:space-between;font-size:12px;color:#6B7280;margin-bottom:7px;}
+    .prog-track{background:#F3F4F6;border-radius:99px;height:7px;overflow:hidden;}
+    .prog-fill{height:100%;background:linear-gradient(90deg,#059669,#34D399);border-radius:99px;transition:width .6s;}
+    .bdown{background:white;border:1px solid #E8E6E1;border-radius:11px;padding:14px 18px;margin-bottom:14px;}
+    .bdt{font-family:'Playfair Display',serif;font-size:14px;color:#1C2B3A;margin-bottom:10px;}
+    .brow{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+    .blbl{font-size:11px;color:#4B5563;width:110px;flex-shrink:0;}.btrack{flex:1;background:#F3F4F6;border-radius:99px;height:5px;overflow:hidden;}.bfill{height:100%;border-radius:99px;}.bamt{font-size:11px;color:#1C2B3A;font-weight:600;width:60px;text-align:right;flex-shrink:0;}
+    .fbar{display:flex;gap:7px;margin-bottom:11px;flex-wrap:wrap;align-items:center;}
+    .pill{background:white;border:1px solid #E8E6E1;border-radius:20px;padding:5px 12px;font-size:11px;color:#6B7280;cursor:pointer;font-family:'Source Sans 3',sans-serif;}.pill.on{background:#1C2B3A;color:white;border-color:#1C2B3A;}
+    .fsel{background:white;border:1px solid #E8E6E1;border-radius:7px;padding:5px 9px;font-family:'Source Sans 3',sans-serif;font-size:12px;color:#374151;cursor:pointer;}
+    .elist{display:flex;flex-direction:column;gap:7px;}
+    .erow{background:white;border:1px solid #E8E6E1;border-radius:10px;padding:13px 15px;display:flex;align-items:center;gap:11px;cursor:pointer;transition:all .15s;}.erow:hover{border-color:#5B9BD5;box-shadow:0 2px 8px rgba(91,155,213,.1);}
+    .cdot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+    .emain{flex:1;min-width:0;}.edesc{font-family:'Playfair Display',serif;font-size:14px;color:#1C2B3A;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.emeta{font-size:11px;color:#9CA3AF;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .eright{text-align:right;flex-shrink:0;}.eamt{font-family:'Playfair Display',serif;font-size:14px;font-weight:700;color:#1C2B3A;}
+    .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;}.bg{background:#D1FAE5;color:#065F46;}.ba{background:#FEF3C7;color:#92400E;}
+    .fcard{background:white;border:1px solid #E8E6E1;border-radius:11px;padding:20px 18px;margin-top:16px;}
+    .ftitle{font-family:'Playfair Display',serif;font-size:17px;color:#1C2B3A;margin-bottom:16px;}
+    .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .fg{display:flex;flex-direction:column;gap:4px;}.fg.full{grid-column:1/-1;}
+    .flbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:#6B7280;}
+    .fi,.fs,.fta{background:#FAFAF9;border:1.5px solid #E8E6E1;border-radius:7px;padding:9px 11px;font-family:'Source Sans 3',sans-serif;font-size:13px;color:#1C2B3A;outline:none;transition:border-color .15s;width:100%;}.fi:focus,.fs:focus,.fta:focus{border-color:#5B9BD5;background:white;}.fta{resize:vertical;min-height:68px;}
+    .rzone{background:#FAFAF9;border:2px dashed #D1D5DB;border-radius:8px;padding:14px;text-align:center;cursor:pointer;}.rzone:hover{border-color:#5B9BD5;background:#EFF6FF;}.rzone p{font-size:12px;color:#9CA3AF;}.rname{font-size:12px;color:#059669;font-weight:600;margin-top:4px;}
+    .sbtn{background:#2563EB;color:white;border:none;border-radius:8px;padding:10px 22px;font-family:'Source Sans 3',sans-serif;font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;}.sbtn:hover{background:#1D4ED8;}
+    .succ{background:#D1FAE5;border:1px solid #6EE7B7;border-radius:8px;padding:11px;font-size:12px;color:#065F46;font-weight:600;text-align:center;}
+    .dp{margin-top:16px;}.bk{background:none;border:none;color:#2563EB;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:5px;padding:5px 0;margin-bottom:12px;font-family:'Source Sans 3',sans-serif;font-weight:600;}
+    .dcard{background:white;border:1px solid #E8E6E1;border-radius:13px;overflow:hidden;margin-bottom:12px;}
+    .dhero{background:linear-gradient(135deg,#1C2B3A,#2D4A6A);padding:22px 22px 18px;}
+    .dhd{font-family:'Playfair Display',serif;font-size:19px;color:white;font-weight:700;margin-bottom:4px;}.dhm{font-size:12px;color:#7A9BB5;}.dha{font-family:'Playfair Display',serif;font-size:32px;font-weight:700;color:white;margin:11px 0 3px;}
+    .dbody{padding:18px 20px;}.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:16px;}
+    .df{display:flex;flex-direction:column;gap:3px;}.df.full{grid-column:1/-1;}.dfk{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:#9CA3AF;}.dfv{font-size:13px;color:#1C2B3A;font-weight:500;}
+    .rs{border:1.5px solid #E8E6E1;border-radius:10px;padding:15px 17px;}.rs.done{border-color:#6EE7B7;background:#F0FDF4;}
+    .rst{font-size:12px;font-weight:700;color:#1C2B3A;margin-bottom:11px;display:flex;align-items:center;gap:6px;}
+    .rfg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;}
+    .ar{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;}
+    .abtn{padding:9px 17px;border:none;border-radius:8px;font-family:'Source Sans 3',sans-serif;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;}
+    .ag{background:#059669;color:white;}.ag:hover{background:#047857;}.ay{background:#FEF3C7;color:#92400E;border:1.5px solid #F59E0B;}.ar-btn{background:#FEE2E2;color:#DC2626;border:1.5px solid #FCA5A5;}
+    .pnote{font-size:11px;color:#9CA3AF;font-style:italic;margin-top:6px;}
+    .admin-tabs{display:flex;gap:2px;background:white;border:1px solid #E8E6E1;border-radius:10px;padding:3px;margin:18px 0 14px;}
+    .atab{flex:1;padding:8px 4px;text-align:center;font-size:12px;font-weight:600;cursor:pointer;border-radius:7px;border:none;background:none;color:#6B7280;font-family:'Source Sans 3',sans-serif;}.atab.on{background:#1C2B3A;color:white;}
+    .utbl{background:white;border:1px solid #E8E6E1;border-radius:11px;overflow:hidden;}
+    .urow{display:flex;align-items:center;gap:11px;padding:11px 15px;border-bottom:1px solid #F3F4F6;flex-wrap:wrap;}.urow:last-child{border-bottom:none;}
+    .uhd{background:#FAFAF9;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#9CA3AF;}
+    .un{flex:1.3;font-weight:600;font-size:13px;color:#1C2B3A;min-width:80px;}.ue{flex:1.8;font-size:12px;color:#6B7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.ur-col{flex:.8;}
+    .ua{display:flex;gap:4px;margin-left:auto;}
+    .ibtn{background:none;border:1px solid #E8E6E1;border-radius:6px;padding:4px 7px;cursor:pointer;font-size:12px;}.ibtn:hover{background:#FEE2E2;border-color:#FCA5A5;}.ibtn.approve{background:#D1FAE5;border-color:#6EE7B7;}.ibtn.mail{background:#EFF6FF;border-color:#BFDBFE;color:#2563EB;}
+    .scard{background:white;border:1px solid #E8E6E1;border-radius:11px;padding:18px 20px;margin-bottom:11px;}
+    .stitle{font-family:'Playfair Display',serif;font-size:15px;color:#1C2B3A;margin-bottom:12px;}
+    .srow{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F3F4F6;gap:12px;}.srow:last-child{border-bottom:none;}
+    .sk{font-size:13px;color:#374151;font-weight:500;}.sdesc{font-size:11px;color:#9CA3AF;margin-top:1px;}
+    .tgl{position:relative;width:40px;height:22px;flex-shrink:0;}.tgl input{opacity:0;width:0;height:0;}.tgl-sl{position:absolute;inset:0;background:#D1D5DB;border-radius:11px;cursor:pointer;transition:.2s;}.tgl input:checked+.tgl-sl{background:#059669;}.tgl-sl:before{content:"";position:absolute;width:16px;height:16px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.2s;}.tgl input:checked+.tgl-sl:before{transform:translateX(18px);}
+    .inv-badge{background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:600;}
+    .cbox{background:#F8FAFC;border:1.5px solid #E2E8F0;border-radius:7px;padding:9px 12px;font-size:11px;color:#475569;word-break:break-all;font-family:monospace;margin-top:7px;cursor:pointer;}.cbox:hover{background:#EFF6FF;}
+    .empty{text-align:center;padding:40px 16px;color:#9CA3AF;}.ei{font-size:32px;margin-bottom:8px;}
+    .mov{position:fixed;inset:0;background:rgba(28,43,58,.5);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:300;padding:16px;}
+    .mbox{background:white;border-radius:14px;width:100%;max-width:460px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto;}
+    .mhd{background:#1C2B3A;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;}.mttl{font-family:'Playfair Display',serif;color:white;font-size:16px;}.mx{background:none;border:none;color:#A0AEC0;cursor:pointer;font-size:19px;line-height:1;}.mbd{padding:20px;}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1C2B3A;color:white;padding:9px 18px;border-radius:99px;font-size:12px;font-weight:600;z-index:999;pointer-events:none;white-space:nowrap;}
+    .erow.sel{border-color:#2563EB;background:#EFF6FF;}
+    .chk{width:16px;height:16px;border-radius:4px;border:1.5px solid #D1D5DB;background:white;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+    .chk.on{background:#2563EB;border-color:#2563EB;color:white;font-size:10px;}
+    .bulk-bar{position:sticky;bottom:16px;margin:12px 0 0;background:#1C2B3A;color:white;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 4px 20px rgba(28,43,58,.4);}
+    .bulk-count{font-size:13px;font-weight:600;}
+    .bulk-btn{background:#2563EB;color:white;border:none;border-radius:7px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Source Sans 3',sans-serif;white-space:nowrap;}
+    .bulk-cancel{background:rgba(255,255,255,.1);color:#A0AEC0;border:1px solid rgba(255,255,255,.15);border-radius:7px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:'Source Sans 3',sans-serif;}
+    .acct-card{background:white;border:1px solid #E8E6E1;border-radius:11px;padding:16px 18px;display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+    .acct-icon{width:38px;height:38px;background:linear-gradient(135deg,#1C2B3A,#2D4A6A);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+    .acct-main{flex:1;min-width:0;}
+    .acct-name{font-family:'Playfair Display',serif;font-size:15px;color:#1C2B3A;font-weight:600;}
+    .acct-detail{font-size:11px;color:#9CA3AF;margin-top:2px;}
+    .acct-bal{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#059669;text-align:right;}
+    .acct-reimb{font-size:11px;color:#9CA3AF;text-align:right;margin-top:1px;}
+    .mov-sm{position:fixed;inset:0;background:rgba(28,43,58,.5);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:300;padding:16px;}
+    .mbox-sm{background:white;border-radius:14px;width:100%;max-width:380px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+    .mhd-sm{background:#1C2B3A;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;}
+    .mbd-sm{padding:18px;}
+    .fi-sm{background:#F9FAFB;border:1.5px solid #D1D5DB;border-radius:8px;padding:11px 13px;font-size:14px;color:#1C2B3A;outline:none;width:100%;margin-bottom:12px;font-family:'Source Sans 3',sans-serif;}
+    .fi-sm:focus{border-color:#2563EB;}
+    .lbl-sm{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:#6B7280;margin-bottom:5px;}
+
+  `;
+
+  return (
+    <div className="app"><style>{CSS}</style>
+      <div className="header">
+        <div className="logo">529<span>Track</span></div>
+        <nav className="nav">
+          <button className={`nb${view==="dash"?" on":""}`} onClick={()=>setView("dash")}>Dashboard</button>
+          <button className={`nb${view==="list"||view==="det"?" on":""}`} onClick={()=>setView("list")}>Expenses</button>
+          {can(currentUser,"add")&&<button className={`nb${view==="add"?" on":""}`} onClick={()=>setView("add")}>+ Add</button>}
+          <button className={`nb${view==="accts"?" on":""}`} onClick={()=>setView("accts")}>💰 Accounts</button>
+          {can(currentUser,"manageUsers")&&<button className={`nb${view==="admin"?" on":""}`} onClick={()=>setView("admin")}>Admin</button>}
+        </nav>
+        <div className="user-area">
+          <div className="avatar">{ini(currentUser.name)}</div>
+          <span className={`rb rb-${currentUser.role}`}>{RI[currentUser.role]}</span>
+          <button className="sign-out" onClick={logout}>Sign out</button>
+        </div>
+      </div>
+      <div className="wrap">
+        {view==="dash"&&<>
+          <div className="sg">
+            <div className="sc"><div className="slbl">Total</div><div className="sv">{f$(tot)}</div><div className="ssub">{expenses.length} items</div></div>
+            <div className="sc"><div className="slbl">Reimbursed</div><div className="sv gn">{f$(rtot)}</div></div>
+            <div className="sc"><div className="slbl">Pending</div><div className="sv am">{f$(tot-rtot)}</div></div>
+          </div>
+          {tot>0&&<div className="prog-wrap"><div className="prog-lbl"><span>Reimbursement Progress</span><span style={{fontWeight:600,color:"#059669"}}>{Math.round((rtot/tot)*100)}%</span></div><div className="prog-track"><div className="prog-fill" style={{width:`${(rtot/tot)*100}%`}}></div></div></div>}
+          <div className="bdown"><div className="bdt">By Category</div>{catBd.length===0?<p style={{fontSize:12,color:"#9CA3AF"}}>No expenses yet.</p>:catBd.map(({cat,amt})=><div className="brow" key={cat}><div className="blbl">{cat}</div><div className="btrack"><div className="bfill" style={{width:`${(amt/tot)*100}%`,background:CC[cat]}}></div></div><div className="bamt">{f$(amt)}</div></div>)}</div>
+          <div className="sh"><div className="sht">Recent Expenses</div><div className="hd-acts">{can(currentUser,"add")&&<button className="add-btn" onClick={()=>setView("add")}>＋ Add</button>}{expenses.length>0&&<button className="dl-btn" onClick={()=>dlCSV(expenses)}>⬇ CSV</button>}</div></div>
+          {expenses.length===0?<div className="empty"><div className="ei">📋</div><p>No expenses yet.</p></div>:<div className="elist">{expenses.slice(0,6).map(e=><div className="erow" key={e.id} onClick={()=>{setDetailId(e.id);setView("det");}}><div className="cdot" style={{background:CC[e.category]}}></div><div className="emain"><div className="edesc">{e.description}</div><div className="emeta">{fD(e.date)}{e.payee&&` · ${e.payee}`} · {e.category}</div></div><div className="eright"><div className="eamt">{f$(e.amount)}</div><div style={{marginTop:2}}><span className={`badge ${e.reimbursed?"bg":"ba"}`}>{e.reimbursed?"✓ Reimb":"○ Pending"}</span></div></div></div>)}</div>}
+        </>}
+        {view==="list"&&<>
+          <div className="sh" style={{marginTop:16}}>
+            <div className="sht">All Expenses</div>
+            <div className="hd-acts">
+              {can(currentUser,"markReimbursed")&&filt.some(e=>!e.reimbursed)&&(
+                selectedIds.size===0
+                  ? <button className="dl-btn" onClick={()=>{ setSelectedIds(new Set(filt.filter(e=>!e.reimbursed).map(e=>e.id))); }}>☑ Select All Pending</button>
+                  : <button className="dl-btn" onClick={()=>setSelectedIds(new Set())}>✕ Clear</button>
+              )}
+              {can(currentUser,"add")&&<button className="add-btn" onClick={()=>setView("add")}>＋ Add</button>}
+              {expenses.length>0&&<button className="dl-btn" onClick={()=>dlCSV(filt)}>⬇ CSV</button>}
+            </div>
+          </div>
+          <div className="fbar"><div style={{display:"flex",gap:6}}>{["all","pending","reimbursed"].map(s=><button key={s} className={`pill${fSt===s?" on":""}`} onClick={()=>setFSt(s)}>{s.charAt(0).toUpperCase()+s.slice(1)}</button>)}</div><select className="fsel" value={fCt} onChange={e=>setFCt(e.target.value)}><option value="all">All Categories</option>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+          {filt.length===0
+            ? <div className="empty"><div className="ei">📋</div><p>No expenses match.</p></div>
+            : <div className="elist">{filt.map(e=>{
+                const isSel=selectedIds.has(e.id);
+                const toggleSel=()=>{
+                  if(e.reimbursed)return;
+                  const ns=new Set(selectedIds);
+                  isSel?ns.delete(e.id):ns.add(e.id);
+                  setSelectedIds(ns);
+                };
+                return (
+                  <div className={`erow${isSel?" sel":""}`} key={e.id}
+                    onClick={selectedIds.size>0&&!e.reimbursed ? toggleSel : ()=>{setDetailId(e.id);setView("det");}}>
+                    {selectedIds.size>0&&!e.reimbursed
+                      ? <div className={`chk${isSel?" on":""}`} onClick={e2=>{e2.stopPropagation();toggleSel();}}>{isSel?"✓":""}</div>
+                      : <div className="cdot" style={{background:CC[e.category]}}></div>
+                    }
+                    <div className="emain"><div className="edesc">{e.description}</div><div className="emeta">{fD(e.date)}{e.payee&&` · ${e.payee}`} · {e.addedBy}</div></div>
+                    <div className="eright"><div className="eamt">{f$(e.amount)}</div><div style={{marginTop:2}}><span className={`badge ${e.reimbursed?"bg":"ba"}`}>{e.reimbursed?"✓ Reimb":"○ Pending"}</span></div></div>
+                  </div>
+                );
+              })}</div>
+          }
+          {selectedIds.size>0&&can(currentUser,"markReimbursed")&&(
+            <div className="bulk-bar">
+              <span className="bulk-count">{selectedIds.size} expense{selectedIds.size!==1?"s":""} selected · {f$(filt.filter(e=>selectedIds.has(e.id)).reduce((s,e)=>s+e.amount,0))}</span>
+              <button className="bulk-btn" onClick={()=>setShowBulk(true)}>✓ Mark All Reimbursed</button>
+              <button className="bulk-cancel" onClick={()=>setSelectedIds(new Set())}>Cancel</button>
+            </div>
+          )}
+        </>}
+        {view==="det"&&detExp&&<DetailPage exp={detExp} cu={currentUser} onBack={()=>setView("list")} onDel={delExp} onMark={markR} onUnmark={unmkR} onUpd={updExp}/>}
+        {view==="add"&&can(currentUser,"add")&&<div className="fcard">
+          <div className="ftitle">Add New Expense</div>
+          {succ?<div className="succ">✓ Expense added!</div>:<div className="fgrid">
+            <div className="fg"><label className="flbl">Date</label><input type="date" className="fi" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/></div>
+            <div className="fg"><label className="flbl">Amount ($)</label><input type="number" placeholder="0.00" className="fi" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} step="0.01" min="0"/></div>
+            <div className="fg full"><label className="flbl">Description</label><input className="fi" placeholder="e.g. Fall Semester Tuition" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/></div>
+            <div className="fg"><label className="flbl">Payee</label><input className="fi" placeholder="e.g. University Bursar" value={form.payee} onChange={e=>setForm(f=>({...f,payee:e.target.value}))}/></div>
+            <div className="fg"><label className="flbl">Category</label><select className="fs" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+            <div className="fg full"><label className="flbl">Notes</label><textarea className="fta" placeholder="Any notes…" value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/></div>
+            <div className="fg full"><label className="flbl">Receipt</label><div className="rzone" onClick={()=>fref.current?.click()}><p>📎 Click to attach receipt</p>{form.receiptName&&<div className="rname">✓ {form.receiptName}</div>}</div><input ref={fref} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{if(e.target.files[0])setForm(f=>({...f,receiptName:e.target.files[0].name}));}}/></div>
+            <div className="fg full" style={{display:"flex",gap:8}}><button className="sbtn" onClick={addExp}>Save →</button><button className="dl-btn" onClick={()=>setView("list")}>Cancel</button></div>
+          </div>}
+        </div>}
+        {view==="accts"&&<AccountsView accts={accts} expenses={expenses} saveA={saveA} canEdit={can(currentUser,"add")}/>}
+        {view==="admin"&&can(currentUser,"manageUsers")&&<>
+          <div className="admin-tabs">{[["users","👥 Users"],["invites",`✉️ Invites${pendInvs.length>0?` (${pendInvs.length})`:""}`],["pend",`⏳${users.filter(u=>u.status==="pending").length>0?` (${users.filter(u=>u.status==="pending").length})`:""}`],["set","⚙️"]].map(([t,l])=><button key={t} className={`atab${atab===t?" on":""}`} onClick={()=>setAtab(t)}>{l}</button>)}</div>
+          {atab==="users"&&<><div className="utbl">{users.filter(u=>u.status!=="pending").map(u=><div className="urow" key={u.id}><div className="un">{u.name}{u.id===currentUser.id&&<span style={{fontSize:10,color:"#9CA3AF",marginLeft:4}}>(you)</span>}</div><div className="ue">{u.email}</div><div className="ur-col">{u.id===currentUser.id?<span className={`rb rb-${u.role}`}>{u.role}</span>:<select className="fsel" style={{padding:"3px 7px",fontSize:11}} value={u.role} onChange={e=>saveU(users.map(x=>x.id===u.id?{...x,role:e.target.value}:x))}>{ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select>}</div><div className="ua">{u.id!==currentUser.id&&<button className="ibtn" onClick={()=>saveU(users.filter(x=>x.id!==u.id))}>🗑</button>}</div></div>)}</div><button className="add-btn" style={{marginTop:12}} onClick={()=>setShowInv(true)}>✉️ Invite Someone</button></>}
+          {atab==="invites"&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:12,color:"#6B7280"}}>Recipients click the link to join.</span><button className="add-btn" onClick={()=>setShowInv(true)}>✉️ New</button></div>{invites.length===0?<div className="empty"><div className="ei">✉️</div><p>No invites yet.</p></div>:<div className="utbl">{[...invites].reverse().map(inv=><div className="urow" key={inv.id}><div className="un">{inv.name}</div><div className="ue">{inv.email}</div><div className="ur-col"><span className={`rb rb-${inv.role}`}>{inv.role}</span></div><div style={{marginLeft:"auto",display:"flex",gap:4,alignItems:"center"}}>{inv.used?<span className="badge bg" style={{fontSize:10}}>✓ used</span>:<span className="inv-badge">pending</span>}{!inv.used&&<><button className="ibtn mail" onClick={()=>openInvEmail(inv,settings.accountName,currentUser.name)}>📧</button><button className="ibtn mail" onClick={()=>{const l=mkInvLink(inv.token,inv.name,inv.email,inv.role,settings.accountName);navigator.clipboard.writeText(l).then(()=>showToast("✓ Copied!"));}}>🔗</button></>}<button className="ibtn" onClick={()=>saveI(invites.filter(i=>i.id!==inv.id))}>🗑</button></div></div>)}</div>}</>}
+          {atab==="pend"&&<>{users.filter(u=>u.status==="pending").length===0?<div className="empty"><div className="ei">✅</div><p>No pending.</p></div>:<div className="utbl">{users.filter(u=>u.status==="pending").map(u=><div className="urow" key={u.id}><div className="un">{u.name}</div><div className="ue">{u.email}</div><div className="ur-col"><span className={`rb rb-${u.role}`}>{u.role}</span></div><div className="ua"><button className="ibtn approve" onClick={()=>saveU(users.map(x=>x.id===u.id?{...x,status:"active"}:x))}>✓</button><button className="ibtn" onClick={()=>saveU(users.filter(x=>x.id!==u.id))}>✕</button></div></div>)}</div>}</>}
+          {atab==="set"&&<><div className="scard"><div className="stitle">Account</div><div className="srow"><div className="sk">Account Name</div><input className="fi" style={{width:180}} value={settings.accountName} onChange={e=>saveS({...settings,accountName:e.target.value})}/></div></div><div className="scard"><div className="stitle">Registration</div><div className="srow"><div><div className="sk">Allow Self-Registration</div></div><label className="tgl"><input type="checkbox" checked={settings.allowSelfRegister} onChange={e=>saveS({...settings,allowSelfRegister:e.target.checked})}/><span className="tgl-sl"></span></label></div><div className="srow"><div><div className="sk">Require Admin Approval</div></div><label className="tgl"><input type="checkbox" checked={settings.requireApproval} onChange={e=>saveS({...settings,requireApproval:e.target.checked})}/><span className="tgl-sl"></span></label></div></div><div className="scard"><div className="stitle" style={{color:"#DC2626"}}>Danger Zone</div><div className="srow"><div className="sk" style={{color:"#DC2626"}}>Clear Expenses</div><button className="abtn ar-btn" style={{padding:"6px 12px"}} onClick={()=>saveE([])}>Clear</button></div><div className="srow"><div className="sk" style={{color:"#DC2626"}}>Reset App</div><button className="abtn ar-btn" style={{padding:"6px 12px"}} onClick={async()=>{{for(const k of Object.values(SK))await window.storage.delete(k);window.location.reload();}}}>Reset</button></div></div></>}
+        </>}
+      </div>
+      {showBulk&&<BulkReimbModal
+        count={selectedIds.size}
+        total={expenses.filter(e=>selectedIds.has(e.id)).reduce((s,e)=>s+e.amount,0)}
+        accts={accts}
+        onConfirm={(from,date)=>bulkMarkR(selectedIds,from,date)}
+        onClose={()=>setShowBulk(false)}
+      />}
+      {showInv&&<InviteModal settings={settings} cu={currentUser} onSend={createInv} onClose={()=>setShowInv(false)}/>}
+      {toast&&<div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LOGIN PAGE — rendered immediately, no waiting
+// ═══════════════════════════════════════════════════════════════════
+function LoginPage({ users, ready, settings, onLogin, onSetup, onForgot, onRegister }) {
+  const [email, setEmail] = useState("");
+  const [pw,    setPw]    = useState("");
+  const [err,   setErr]   = useState("");
+
+  const go = () => {
+    setErr("");
+    if (!ready) { setErr("Still loading, please wait a moment…"); return; }
+    // Only go to setup if storage has fully loaded and there are genuinely no users
+    if (ready && users.length === 0) { onSetup(); return; }
+    const u = users.find(x => x.email === email.toLowerCase().trim());
+    if (!u)                        { setErr("No account found with that email."); return; }
+    if (u.passwordHash !== hsh(pw)){ setErr("Incorrect password."); return; }
+    if (u.status === "pending")    { setErr("Your account is awaiting admin approval."); return; }
+    onLogin(u);
+  };
+
+  return (
+    <div style={G.page}>
+      <div style={{marginBottom:28,textAlign:"center"}}>
+        <div style={G.logo}>529<span style={G.logoSpan}>Track</span></div>
+        <div style={G.tagline}>529 Education Expense Tracker</div>
+      </div>
+
+      <div style={G.card}>
+        <div style={G.cardTitle}>Log In</div>
+        <div style={G.cardSub}>Enter your email and password to continue.</div>
+
+        {err && <div style={G.err}>{err}</div>}
+
+        <label style={G.label}>Email Address</label>
+        <input
+          style={G.input}
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          onKeyDown={e => e.key==="Enter" && go()}
+          autoFocus
+        />
+
+        <label style={G.label}>Password</label>
+        <input
+          style={G.input}
+          type="password"
+          placeholder="Your password"
+          value={pw}
+          onChange={e => setPw(e.target.value)}
+          onKeyDown={e => e.key==="Enter" && go()}
+        />
+
+        <button style={G.btnBlue} onClick={go}>
+          {!ready ? "Loading…" : "Log In →"}
+        </button>
+
+        <div style={G.links}>
+          <a style={G.link} onClick={onForgot}>Forgot your password?</a>
+          {onRegister && <a style={G.link} onClick={onRegister}>Create a new account</a>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FORGOT PASSWORD PAGE
+// ═══════════════════════════════════════════════════════════════════
+function ForgotPage({ users, onSave, onBack }) {
+  const [step, setStep] = useState(0);
+  const [email, setEmail] = useState("");
+  const [npw,   setNpw]   = useState("");
+  const [conf,  setConf]  = useState("");
+  const [err,   setErr]   = useState("");
+  const [found, setFound] = useState(null);
+
+  const find = () => {
+    setErr("");
+    const u = users.find(x => x.email === email.toLowerCase().trim());
+    if (!u) { setErr("No account found with that email."); return; }
+    setFound(u); setStep(1);
+  };
+  const reset = () => {
+    setErr("");
+    if (!npw)        { setErr("Please enter a new password."); return; }
+    if (npw.length<6){ setErr("Min. 6 characters."); return; }
+    if (npw !== conf){ setErr("Passwords don't match."); return; }
+    onSave(users.map(u => u.id===found.id ? {...u, passwordHash:hsh(npw)} : u));
+    setStep(2);
+  };
+
+  return (
+    <div style={G.page}>
+      <div style={{marginBottom:28,textAlign:"center"}}>
+        <div style={G.logo}>529<span style={G.logoSpan}>Track</span></div>
+      </div>
+      <div style={G.card}>
+        <div style={G.cardTitle}>Recover Password</div>
+
+        {err && <div style={G.err}>{err}</div>}
+
+        {step===0 && <>
+          <div style={G.cardSub}>Enter your email to find your account.</div>
+          <label style={G.label}>Email Address</label>
+          <input style={G.input} type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&find()} autoFocus/>
+          <div style={{...G.info, marginBottom:16}}>Since data is stored locally, your password resets instantly — no email needed.</div>
+          <button style={G.btnBlue} onClick={find}>Find My Account →</button>
+        </>}
+
+        {step===1 && <>
+          <div style={G.ok}>✓ Account found: <strong>{found?.name}</strong></div>
+          <label style={G.label}>New Password</label>
+          <input style={G.input} type="password" placeholder="Min. 6 characters" value={npw} onChange={e=>setNpw(e.target.value)} autoFocus/>
+          <label style={G.label}>Confirm New Password</label>
+          <input style={G.input} type="password" placeholder="Repeat" value={conf} onChange={e=>setConf(e.target.value)} onKeyDown={e=>e.key==="Enter"&&reset()}/>
+          <button style={G.btnBlue} onClick={reset}>Set New Password →</button>
+          <button style={G.btnGhost} onClick={()=>setStep(0)}>← Back</button>
+        </>}
+
+        {step===2 && <>
+          <div style={{...G.ok, padding:16, fontSize:16}}>✅ Password updated!</div>
+          <p style={{fontSize:14,color:"#6B7280",marginBottom:20}}>You can now log in with your new password.</p>
+          <button style={G.btnBlue} onClick={onBack}>← Back to Log In</button>
+        </>}
+
+        {step < 2 && <div style={G.links}><a style={G.link} onClick={onBack}>← Back to Log In</a></div>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// REGISTER PAGE
+// ═══════════════════════════════════════════════════════════════════
+function RegisterPage({ users, settings, onSave, onBack }) {
+  const isFirst = users.length === 0; // first user becomes admin automatically
+  const [f, setF] = useState({name:"",email:"",password:"",confirm:"",role:"adder"});
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState(false);
+
+  const go = () => {
+    setErr("");
+    if (!f.name||!f.email||!f.password) { setErr("All fields are required."); return; }
+    if (f.password !== f.confirm)        { setErr("Passwords don't match."); return; }
+    if (f.password.length < 6)           { setErr("Password must be at least 6 characters."); return; }
+    if (users.find(u=>u.email===f.email.toLowerCase().trim())) { setErr("An account with that email already exists."); return; }
+    // First user is always admin and always active (no approval gate)
+    const role   = isFirst ? "admin" : f.role;
+    const status = isFirst ? "active" : (settings.requireApproval ? "pending" : "active");
+    const nu = {id:Date.now(),name:f.name,email:f.email.toLowerCase().trim(),passwordHash:hsh(f.password),role,status,createdAt:td()};
+    onSave([...users, nu]); setDone(true);
+  };
+
+  if (done) return (
+    <div style={G.page}>
+      <div style={{marginBottom:28,textAlign:"center"}}><div style={G.logo}>529<span style={G.logoSpan}>Track</span></div></div>
+      <div style={G.card}>
+        <div style={{...G.ok, padding:16, fontSize:16}}>✅ Account created!</div>
+        <p style={{fontSize:14,color:"#6B7280",marginBottom:20}}>
+          {isFirst ? "You're the administrator. You can now log in." : settings.requireApproval ? "Your account is pending admin approval." : "You can now log in."}
+        </p>
+        <button style={G.btnBlue} onClick={onBack}>Go to Log In →</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={G.page}>
+      <div style={{marginBottom:28,textAlign:"center"}}><div style={G.logo}>529<span style={G.logoSpan}>Track</span></div></div>
+      <div style={G.card}>
+        <div style={G.cardTitle}>Create Account</div>
+        <div style={G.cardSub}>{isFirst ? "You'll be the administrator of this account." : `Join ${settings.accountName}`}</div>
+        {isFirst && (
+          <div style={{...G.info, marginBottom:16}}>
+            👑 As the first user, you'll automatically be set as <strong>Administrator</strong> with full access to manage users, settings, and expenses.
+          </div>
+        )}
+        {err && <div style={G.err}>{err}</div>}
+        <label style={G.label}>Full Name</label>
+        <input style={G.input} placeholder="Your full name" value={f.name} onChange={e=>setF(x=>({...x,name:e.target.value}))} autoFocus/>
+        <label style={G.label}>Email Address</label>
+        <input style={G.input} type="email" placeholder="you@example.com" value={f.email} onChange={e=>setF(x=>({...x,email:e.target.value}))}/>
+        <label style={G.label}>Password</label>
+        <input style={G.input} type="password" placeholder="Min. 6 characters" value={f.password} onChange={e=>setF(x=>({...x,password:e.target.value}))}/>
+        <label style={G.label}>Confirm Password</label>
+        <input style={G.input} type="password" placeholder="Repeat password" value={f.confirm} onChange={e=>setF(x=>({...x,confirm:e.target.value}))}/>
+        {!isFirst && <>
+          <label style={G.label}>Permission Level</label>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+            {ROLES.filter(r=>r.id!=="admin").map(r=>(
+              <div key={r.id} onClick={()=>setF(x=>({...x,role:r.id}))} style={{border:`1.5px solid ${f.role===r.id?"#2563EB":"#D1D5DB"}`,background:f.role===r.id?"#EFF6FF":"white",borderRadius:9,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>{RI[r.id]}</span>
+                <div><div style={{fontWeight:600,fontSize:13,color:"#1C2B3A"}}>{r.label}</div><div style={{fontSize:11,color:"#9CA3AF"}}>{r.desc}</div></div>
+                {f.role===r.id&&<span style={{marginLeft:"auto",color:"#2563EB",fontSize:16}}>✓</span>}
+              </div>
+            ))}
+          </div>
+          {settings.requireApproval&&<div style={G.info}>ℹ️ An admin will approve your account before you can log in.</div>}
+        </>}
+        <button style={G.btnBlue} onClick={go}>Create Account →</button>
+        <div style={G.links}><a style={G.link} onClick={onBack}>Already have an account? Log in</a></div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INVITE ACCEPT PAGE
+// ═══════════════════════════════════════════════════════════════════
+function InviteAcceptPage({ inv, stored, onAccept, onBack }) {
+  const [pw,setPw]=useState(""); const [pw2,setPw2]=useState(""); const [err,setErr]=useState(""); const [done,setDone]=useState(false);
+  const go=()=>{ setErr(""); if(!pw){setErr("Please set a password.");return;} if(pw.length<6){setErr("Min. 6 characters.");return;} if(pw!==pw2){setErr("Passwords don't match.");return;} onAccept(inv.token,inv.name,inv.email,inv.role,pw); setDone(true); };
+  const rInfo=ROLES.find(r=>r.id===inv?.role);
+  if(!inv)return <div style={G.page}><div style={G.card}><div style={G.err}>Invalid invite link.</div><button style={G.btnBlue} onClick={onBack}>Back to Log In</button></div></div>;
+  if(stored?.used)return <div style={G.page}><div style={G.card}><div style={{...G.err,background:"#FFFBEB",borderColor:"#FDE68A",color:"#92400E"}}>⚠️ This invite has already been used.</div><button style={G.btnBlue} onClick={onBack}>Back to Log In</button></div></div>;
+  if(done)return <div style={G.page}><div style={G.card}><div style={{...G.ok,padding:16,fontSize:16}}>✅ Account created! Signing you in…</div></div></div>;
+  return(
+    <div style={G.page}>
+      <div style={{marginBottom:28,textAlign:"center"}}><div style={G.logo}>529<span style={G.logoSpan}>Track</span></div></div>
+      <div style={G.card}>
+        <div style={G.cardTitle}>You've been invited!</div>
+        <div style={G.cardSub}>Welcome, {inv.name}! Set a password to join.</div>
+        <div style={{...G.info,marginBottom:18}}>📧 {inv.email}<br/>🔑 {rInfo?.label} — {rInfo?.desc}<br/>🏠 {inv.accountName}</div>
+        {err&&<div style={G.err}>{err}</div>}
+        <label style={G.label}>Create Password</label>
+        <input style={G.input} type="password" placeholder="Min. 6 characters" value={pw} onChange={e=>setPw(e.target.value)} autoFocus/>
+        <label style={G.label}>Confirm Password</label>
+        <input style={G.input} type="password" placeholder="Repeat" value={pw2} onChange={e=>setPw2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
+        <button style={G.btnBlue} onClick={go}>Create Account & Log In →</button>
+        <button style={G.btnGhost} onClick={onBack}>← Back</button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SETUP WIZARD
+// ═══════════════════════════════════════════════════════════════════
+function SetupWizard({ onDone }) {
+  const [step,setStep]=useState(0); const [acct,setAcct]=useState({name:"",studentName:""}); const [admin,setAdmin]=useState({name:"",email:"",password:"",confirm:""}); const [sample,setSample]=useState(true); const [err,setErr]=useState("");
+  const next=()=>{ setErr(""); if(step===0){if(!acct.name.trim()){setErr("Please enter an account name.");return;}setStep(1);}else if(step===1){if(!admin.name||!admin.email||!admin.password){setErr("All fields required.");return;}if(admin.password!==admin.confirm){setErr("Passwords don't match.");return;}if(admin.password.length<6){setErr("Min. 6 characters.");return;}setStep(2);}else{const au={id:Date.now(),name:admin.name,email:admin.email.toLowerCase().trim(),passwordHash:hsh(admin.password),role:"admin",status:"active",createdAt:td()};onDone(au,sample?SAMPLE:[],{accountName:acct.name,studentName:acct.studentName,allowSelfRegister:true,requireApproval:false});} };
+  const steps=["Account","Admin","Launch"];
+  return(
+    <div style={G.page}>
+      <div style={{marginBottom:24,textAlign:"center"}}><div style={G.logo}>529<span style={G.logoSpan}>Track</span></div><div style={G.tagline}>First-time Setup — Step {step+1} of 3: {steps[step]}</div></div>
+      <div style={G.card}>
+        {err&&<div style={G.err}>{err}</div>}
+        {step===0&&<>
+          <div style={G.cardTitle}>Welcome to 529Track!</div>
+          <div style={G.cardSub}>Let's set up your account in a few steps.</div>
+          <label style={G.label}>Account / Family Name</label>
+          <input style={G.input} placeholder="e.g. Johnson Family 529" value={acct.name} onChange={e=>setAcct(a=>({...a,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&next()} autoFocus/>
+          <label style={G.label}>Student's Name (optional)</label>
+          <input style={G.input} placeholder="e.g. Emma Johnson" value={acct.studentName} onChange={e=>setAcct(a=>({...a,studentName:e.target.value}))}/>
+        </>}
+        {step===1&&<>
+          <div style={G.cardTitle}>Create Admin Account</div>
+          <div style={G.cardSub}>Full control over users and settings.</div>
+          <label style={G.label}>Your Full Name</label>
+          <input style={G.input} placeholder="Your name" value={admin.name} onChange={e=>setAdmin(a=>({...a,name:e.target.value}))} autoFocus/>
+          <label style={G.label}>Email Address</label>
+          <input style={G.input} type="email" placeholder="you@example.com" value={admin.email} onChange={e=>setAdmin(a=>({...a,email:e.target.value}))}/>
+          <label style={G.label}>Password</label>
+          <input style={G.input} type="password" placeholder="Min. 6 characters" value={admin.password} onChange={e=>setAdmin(a=>({...a,password:e.target.value}))}/>
+          <label style={G.label}>Confirm Password</label>
+          <input style={G.input} type="password" placeholder="Repeat" value={admin.confirm} onChange={e=>setAdmin(a=>({...a,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&next()}/>
+        </>}
+        {step===2&&<>
+          <div style={G.cardTitle}>Almost there!</div>
+          <div style={{border:"1.5px solid #E8E6E1",borderRadius:10,padding:"14px",marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontWeight:600,fontSize:14,color:"#1C2B3A"}}>Load sample expenses</div><div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>3 examples to explore</div></div>
+              <label style={{position:"relative",width:40,height:22,flexShrink:0}}>
+                <input type="checkbox" checked={sample} onChange={e=>setSample(e.target.checked)} style={{opacity:0,width:0,height:0}}/>
+                <span style={{position:"absolute",inset:0,background:sample?"#059669":"#D1D5DB",borderRadius:11,cursor:"pointer",transition:".2s"}}>
+                  <span style={{position:"absolute",width:16,height:16,left:sample?21:3,bottom:3,background:"white",borderRadius:"50%",transition:".2s"}}/>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div style={G.info}>After setup, use <strong>Admin → Invites</strong> to add family members.<br/><br/>👁 Viewer · ➕ Contributor · ✏️ Editor · 👑 Admin</div>
+        </>}
+        <button style={G.btnBlue} onClick={next}>{step<2?"Continue →":"🚀 Launch 529Track"}</button>
+        {step>0&&<button style={G.btnGhost} onClick={()=>setStep(s=>s-1)}>← Back</button>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INVITE MODAL
+// ═══════════════════════════════════════════════════════════════════
+function InviteModal({ settings, cu, onSend, onClose }) {
+  const [f,setF]=useState({name:"",email:"",role:"adder"}); const [err,setErr]=useState(""); const [sent,setSent]=useState(null); const [copied,setCopied]=useState(false);
+  const send=()=>{ setErr(""); if(!f.name.trim()){setErr("Name required.");return;} if(!f.email.includes("@")){setErr("Valid email required.");return;} setSent(onSend(f.name.trim(),f.email.trim().toLowerCase(),f.role)); };
+  const link=sent?mkInvLink(sent.token,sent.name,sent.email,sent.role,settings.accountName):"";
+  const CSS2=`.field2{display:flex;flex-direction:column;gap:5px;margin-bottom:13px;}.field2 label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:#6B7280;}.field2 input{background:#FAFAF9;border:1.5px solid #E8E6E1;border-radius:8px;padding:11px 13px;font-family:'Source Sans 3',sans-serif;font-size:14px;color:#1C2B3A;outline:none;transition:border-color .15s;width:100%;}.field2 input:focus{border-color:#5B9BD5;background:white;}`;
+  return(<div style={{position:"fixed",inset:0,background:"rgba(28,43,58,.5)",backdropFilter:"blur(3px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}} onClick={onClose}>
+    <div style={{background:"white",borderRadius:14,width:"100%",maxWidth:460,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,.25)",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+      <style>{CSS2}</style>
+      <div style={{background:"#1C2B3A",padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontFamily:"Georgia,serif",color:"white",fontSize:16,fontWeight:700}}>✉️ Invite Someone</span>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"#A0AEC0",cursor:"pointer",fontSize:19,lineHeight:1}}>✕</button>
+      </div>
+      <div style={{padding:20}}>
+        {!sent?(<>
+          <p style={{fontSize:13,color:"#6B7280",marginBottom:16}}>Enter their details. Your Mail app will open with a pre-written invite and their personal sign-up link.</p>
+          {err&&<div style={G.err}>{err}</div>}
+          <div className="field2"><label>Their Full Name</label><input placeholder="e.g. Emma Johnson" value={f.name} onChange={e=>setF(x=>({...x,name:e.target.value}))}/></div>
+          <div className="field2"><label>Their Email</label><input type="email" placeholder="emma@example.com" value={f.email} onChange={e=>setF(x=>({...x,email:e.target.value}))}/></div>
+          <div style={{marginBottom:14}}>
+            <label style={{display:"block",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".8px",color:"#6B7280",marginBottom:8}}>Permission Level</label>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>{ROLES.filter(r=>r.id!=="admin").map(r=><div key={r.id} onClick={()=>setF(x=>({...x,role:r.id}))} style={{border:`1.5px solid ${f.role===r.id?"#2563EB":"#E8E6E1"}`,background:f.role===r.id?"#EFF6FF":"white",borderRadius:9,padding:"9px 13px",cursor:"pointer",display:"flex",alignItems:"center",gap:9}}><span style={{fontSize:16}}>{RI[r.id]}</span><div><div style={{fontWeight:600,fontSize:13,color:"#1C2B3A"}}>{r.label}</div><div style={{fontSize:11,color:"#9CA3AF"}}>{r.desc}</div></div>{f.role===r.id&&<span style={{marginLeft:"auto",color:"#2563EB"}}>✓</span>}</div>)}</div>
+          </div>
+          <button style={G.btnBlue} onClick={send}>Open Mail App with Invite →</button>
+        </>):(<>
+          <div style={{...G.ok,marginBottom:12}}>✅ Invite created for <strong>{sent.name}</strong>!</div>
+          <p style={{fontSize:13,color:"#374151",marginBottom:7}}>If Mail didn't open, copy and share this link:</p>
+          <div style={{background:"#F8FAFC",border:"1.5px solid #E2E8F0",borderRadius:7,padding:"9px 12px",fontSize:11,color:"#475569",wordBreak:"break-all",fontFamily:"monospace",cursor:"pointer"}} onClick={()=>{navigator.clipboard.writeText(link).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);})}}>{link}</div>
+          {copied&&<p style={{fontSize:12,color:"#059669",fontWeight:600,marginTop:5}}>✓ Copied!</p>}
+          <div style={{...G.info,marginTop:12}}>Valid for 7 days. {sent.name} will join as <strong>{ROLES.find(r=>r.id===sent.role)?.label}</strong>.</div>
+          <button style={G.btnGhost} onClick={onClose}>Done</button>
+        </>)}
+      </div>
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DETAIL PAGE
+// ═══════════════════════════════════════════════════════════════════
+function DetailPage({ exp, cu, onBack, onDel, onMark, onUnmark, onUpd }) {
+  const [reimb,setReimb]=useState({from:exp.reimbursedFrom||"",date:exp.reimbursedDate||td()});
+  const [edit,setEdit]=useState(false);
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const [ef,setEf]=useState({description:exp.description,payee:exp.payee||"",amount:exp.amount,category:exp.category,date:exp.date,notes:exp.notes||""});
+  useEffect(()=>setReimb({from:exp.reimbursedFrom||"",date:exp.reimbursedDate||td()}),[exp.reimbursedFrom,exp.reimbursedDate]);
+  const sv=()=>{onUpd(exp.id,{...ef,amount:parseFloat(ef.amount)});setEdit(false);};
+  const CSS3=`
+    .dp{margin-top:16px;font-family:'Source Sans 3',sans-serif;}
+    .bk{background:none;border:none;color:#2563EB;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:5px;padding:5px 0;margin-bottom:12px;font-family:'Source Sans 3',sans-serif;font-weight:600;}
+    .dcard{background:white;border:1px solid #E8E6E1;border-radius:13px;overflow:hidden;margin-bottom:12px;}
+    .dhero{background:linear-gradient(135deg,#1C2B3A,#2D4A6A);padding:22px 22px 18px;}
+    .dhd{font-family:Georgia,serif;font-size:19px;color:white;font-weight:700;margin-bottom:4px;}.dhm{font-size:12px;color:#7A9BB5;}.dha{font-family:Georgia,serif;font-size:32px;font-weight:700;color:white;margin:11px 0 3px;}
+    .dbody{padding:18px 20px;}.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:16px;}
+    .df{display:flex;flex-direction:column;gap:3px;}.df.full{grid-column:1/-1;}.dfk{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:#9CA3AF;}.dfv{font-size:13px;color:#1C2B3A;font-weight:500;}
+    .rs{border:1.5px solid #E8E6E1;border-radius:10px;padding:15px 17px;margin-bottom:14px;}.rs.done{border-color:#6EE7B7;background:#F0FDF4;}
+    .rst{font-size:12px;font-weight:700;color:#1C2B3A;margin-bottom:11px;}.rfg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;}
+    .ar{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;}
+    .abtn{padding:9px 17px;border:none;border-radius:8px;font-family:'Source Sans 3',sans-serif;font-size:12px;font-weight:600;cursor:pointer;}
+    .ag{background:#059669;color:white;}.ay{background:#FEF3C7;color:#92400E;border:1.5px solid #F59E0B;}.ar-btn{background:#FEE2E2;color:#DC2626;border:1.5px solid #FCA5A5;}
+    .fi2{background:#FAFAF9;border:1.5px solid #E8E6E1;border-radius:7px;padding:9px 11px;font-family:'Source Sans 3',sans-serif;font-size:13px;color:#1C2B3A;outline:none;width:100%;}
+    .fi2:focus{border-color:#5B9BD5;background:white;}
+    .fgx{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
+    .fgx .fg{display:flex;flex-direction:column;gap:4px;}.fgx .fg.full{grid-column:1/-1;}
+    .flbl2{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:#6B7280;}
+    .fta2{background:#FAFAF9;border:1.5px solid #E8E6E1;border-radius:7px;padding:9px 11px;font-family:'Source Sans 3',sans-serif;font-size:13px;color:#1C2B3A;outline:none;width:100%;resize:vertical;min-height:68px;}
+  `;
+  return(<div className="dp">
+    <style>{CSS3}</style>
+    <button className="bk" onClick={onBack}>← Back to expenses</button>
+    <div className="dcard">
+      <div className="dhero">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+          <div style={{flex:1}}>{edit?<input className="fi2" style={{background:"rgba(255,255,255,.1)",border:"1.5px solid rgba(255,255,255,.3)",color:"white",fontSize:18,fontFamily:"Georgia,serif",width:"100%",marginBottom:5}} value={ef.description} onChange={e=>setEf(f=>({...f,description:e.target.value}))}/>:<div className="dhd">{exp.description}</div>}<div className="dhm">{fD(exp.date)}{exp.payee&&<span> · <strong style={{color:"#CBD5E1"}}>{exp.payee}</strong></span>} · {exp.addedBy}</div></div>
+          <span style={{display:"inline-flex",alignItems:"center",padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,...(exp.reimbursed?{background:"#D1FAE5",color:"#065F46"}:{background:"#FEF3C7",color:"#92400E"})}}>{exp.reimbursed?"✓ Reimbursed":"○ Pending"}</span>
+        </div>
+        {edit?<input type="number" className="fi2" style={{background:"rgba(255,255,255,.1)",border:"1.5px solid rgba(255,255,255,.3)",color:"white",fontSize:28,fontFamily:"Georgia,serif",fontWeight:700,width:180,marginTop:9}} value={ef.amount} onChange={e=>setEf(f=>({...f,amount:e.target.value}))}/>:<div className="dha">{f$(exp.amount)}</div>}
+      </div>
+      <div className="dbody">
+        {!edit?<div className="dgrid">
+          <div className="df"><div className="dfk">Date</div><div className="dfv">{fD(exp.date)}</div></div>
+          <div className="df"><div className="dfk">Payee</div><div className="dfv">{exp.payee||"—"}</div></div>
+          <div className="df"><div className="dfk">Category</div><div className="dfv" style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:7,height:7,borderRadius:"50%",background:CC[exp.category],flexShrink:0}}></div>{exp.category}</div></div>
+          <div className="df"><div className="dfk">Added By</div><div className="dfv">{exp.addedBy}</div></div>
+          {exp.receiptName&&<div className="df"><div className="dfk">Receipt</div><div className="dfv" style={{color:"#2563EB"}}>📎 {exp.receiptName}</div></div>}
+          {exp.notes&&<div className="df full"><div className="dfk">Notes</div><div className="dfv" style={{fontStyle:"italic",color:"#4B5563"}}>{exp.notes}</div></div>}
+        </div>:<div className="fgx">
+          <div className="fg"><label className="flbl2">Date</label><input type="date" className="fi2" value={ef.date} onChange={e=>setEf(f=>({...f,date:e.target.value}))}/></div>
+          <div className="fg"><label className="flbl2">Payee</label><input className="fi2" value={ef.payee} onChange={e=>setEf(f=>({...f,payee:e.target.value}))}/></div>
+          <div className="fg"><label className="flbl2">Category</label><select className="fi2" value={ef.category} onChange={e=>setEf(f=>({...f,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+          <div className="fg full"><label className="flbl2">Notes</label><textarea className="fta2" value={ef.notes} onChange={e=>setEf(f=>({...f,notes:e.target.value}))}/></div>
+        </div>}
+        <div className={`rs${exp.reimbursed?" done":""}`}>
+          <div className="rst">{exp.reimbursed?"✅":"💰"} 529 Reimbursement{exp.reimbursed&&exp.reimbursedFrom&&<span style={{fontWeight:400,fontSize:11,color:"#6B7280",marginLeft:4}}>from {exp.reimbursedFrom}</span>}</div>
+          {exp.reimbursed?<div className="dgrid" style={{marginBottom:0}}><div className="df"><div className="dfk">From Account</div><div className="dfv">{exp.reimbursedFrom||"—"}</div></div><div className="df"><div className="dfk">Date</div><div className="dfv">{fD(exp.reimbursedDate)}</div></div></div>
+          :can(cu,"markReimbursed")?<div className="rfg"><div className="fg full" style={{gridColumn:"1/3"}}><label className="flbl2">529 Account / Source</label><input className="fi2" placeholder="e.g. Vanguard 529 – #1234" value={reimb.from} onChange={e=>setReimb(r=>({...r,from:e.target.value}))}/></div><div className="fg"><label className="flbl2">Date</label><input type="date" className="fi2" value={reimb.date} onChange={e=>setReimb(r=>({...r,date:e.target.value}))}/></div></div>
+          :<p style={{fontSize:11,color:"#9CA3AF",fontStyle:"italic",marginTop:6}}>No permission to mark reimbursements.</p>}
+          {can(cu,"markReimbursed")&&<div className="ar">{exp.reimbursed?<button className="abtn ay" onClick={()=>onUnmark(exp.id)}>↩ Undo</button>:<button className="abtn ag" onClick={()=>onMark(exp.id,reimb.from,reimb.date)}>✓ Mark Reimbursed</button>}</div>}
+        </div>
+        <div className="ar" style={{paddingTop:14,borderTop:"1px solid #F3F4F6"}}>
+          {can(cu,"add")&&(edit?<><button className="abtn ag" onClick={sv}>💾 Save</button><button className="abtn" style={{background:"#F3F4F6",color:"#374151",border:"none"}} onClick={()=>setEdit(false)}>Cancel</button></>:<button className="abtn" style={{background:"#EFF6FF",color:"#2563EB",border:"1.5px solid #BFDBFE"}} onClick={()=>setEdit(true)}>✏️ Edit</button>)}
+          {can(cu,"delete")&&!edit&&(
+            confirmDelete
+              ? <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:12,color:"#DC2626",fontWeight:600}}>Delete?</span>
+                  <button className="abtn ar-btn" style={{padding:"7px 12px"}} onClick={()=>onDel(exp.id)}>Yes, delete</button>
+                  <button className="abtn" style={{background:"#F3F4F6",color:"#374151",border:"none",padding:"7px 12px"}} onClick={()=>setConfirmDelete(false)}>Cancel</button>
+                </span>
+              : <button className="abtn ar-btn" onClick={()=>setConfirmDelete(true)}>🗑 Delete</button>
+          )}
+          <button className="abtn" style={{background:"white",color:"#6B7280",border:"1.5px solid #E8E6E1",marginLeft:"auto"}} onClick={()=>dlCSV([exp])}>⬇ Export</button>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ACCOUNTS VIEW — track 529 accounts, balances, and reimbursements
+// ═══════════════════════════════════════════════════════════════════
+function AccountsView({ accts, expenses, saveA, canEdit }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId]   = useState(null);
+
+  const totalReimbursed = acct =>
+    expenses.filter(e=>e.reimbursed && e.reimbursedFrom===acct.name).reduce((s,e)=>s+e.amount,0);
+
+  const f$ = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n);
+
+  return (
+    <div style={{marginTop:16,fontFamily:"'Source Sans 3',sans-serif"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,color:"#1C2B3A"}}>529 Accounts</div>
+        {canEdit && <button className="add-btn" onClick={()=>{setEditId(null);setShowAdd(true);}}>＋ Add Account</button>}
+      </div>
+
+      {accts.length===0 ? (
+        <div className="empty">
+          <div className="ei">🏦</div>
+          <p>No 529 accounts yet.</p>
+          {canEdit && <button className="add-btn" style={{margin:"12px auto 0",display:"flex"}} onClick={()=>setShowAdd(true)}>＋ Add Your First Account</button>}
+        </div>
+      ) : (
+        <>
+          {/* Summary bar */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+            <div className="sc"><div className="slbl">Total Balance</div><div className="sv gn">{f$(accts.reduce((s,a)=>s+(a.balance||0),0))}</div></div>
+            <div className="sc"><div className="slbl">Total Reimbursed</div><div className="sv">{f$(accts.reduce((s,a)=>s+totalReimbursed(a),0))}</div></div>
+            <div className="sc"><div className="slbl">Accounts</div><div className="sv">{accts.length}</div></div>
+          </div>
+
+          {accts.map(acct => {
+            const reimb = totalReimbursed(acct);
+            const remaining = (acct.balance||0) - reimb;
+            return (
+              <div className="acct-card" key={acct.id}>
+                <div className="acct-icon">🏦</div>
+                <div className="acct-main">
+                  <div className="acct-name">{acct.name}</div>
+                  <div className="acct-detail">
+                    {acct.institution && <span>{acct.institution}</span>}
+                    {acct.accountNum && <span> · #{acct.accountNum}</span>}
+                    {acct.owner && <span> · {acct.owner}</span>}
+                  </div>
+                  <div style={{marginTop:6,background:"#F3F4F6",borderRadius:99,height:5,overflow:"hidden",width:"100%"}}>
+                    {acct.balance > 0 && <div style={{height:"100%",background:"linear-gradient(90deg,#2563EB,#5B9BD5)",borderRadius:99,width:`${Math.min(100,(reimb/(acct.balance||1))*100)}%`,transition:"width .6s"}}/>}
+                  </div>
+                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:3}}>
+                    {f$(reimb)} reimbursed · {f$(Math.max(0,remaining))} remaining
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div className="acct-bal">{f$(acct.balance||0)}</div>
+                  <div className="acct-reimb">Balance</div>
+                  {canEdit && (
+                    <div style={{display:"flex",gap:4,justifyContent:"flex-end",marginTop:6}}>
+                      <button className="ibtn" onClick={()=>{setEditId(acct.id);setShowAdd(true);}}>✏️</button>
+                      <button className="ibtn" onClick={()=>saveA(accts.filter(a=>a.id!==acct.id))}>🗑</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {showAdd && (
+        <AccountFormModal
+          existing={editId ? accts.find(a=>a.id===editId) : null}
+          onSave={acct => {
+            if (editId) saveA(accts.map(a=>a.id===editId?{...a,...acct}:a));
+            else        saveA([...accts, {id:Date.now(),...acct}]);
+            setShowAdd(false); setEditId(null);
+          }}
+          onClose={()=>{setShowAdd(false);setEditId(null);}}
+        />
+      )}
+    </div>
+  );
+}
+
+function AccountFormModal({ existing, onSave, onClose }) {
+  const [f,setF] = useState({
+    name:        existing?.name        || "",
+    institution: existing?.institution || "",
+    accountNum:  existing?.accountNum  || "",
+    owner:       existing?.owner       || "",
+    balance:     existing?.balance     || "",
+  });
+  const [err,setErr] = useState("");
+  const go = () => {
+    setErr("");
+    if (!f.name.trim()) { setErr("Account name is required."); return; }
+    onSave({...f, balance: parseFloat(f.balance)||0});
+  };
+  return (
+    <div className="mov-sm" onClick={onClose}>
+      <div className="mbox-sm" onClick={e=>e.stopPropagation()}>
+        <div className="mhd-sm">
+          <span style={{fontFamily:"Georgia,serif",color:"white",fontSize:15,fontWeight:700}}>{existing?"Edit Account":"Add 529 Account"}</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#A0AEC0",cursor:"pointer",fontSize:18,lineHeight:1}}>✕</button>
+        </div>
+        <div className="mbd-sm">
+          {err && <div style={{background:"#FEF2F2",border:"1.5px solid #FCA5A5",borderRadius:7,padding:"9px 12px",fontSize:13,color:"#DC2626",marginBottom:12}}>{err}</div>}
+          <label className="lbl-sm">Account Name *</label>
+          <input className="fi-sm" placeholder="e.g. Vanguard 529 – Account #4821" value={f.name} onChange={e=>setF(x=>({...x,name:e.target.value}))} autoFocus/>
+          <label className="lbl-sm">Institution</label>
+          <input className="fi-sm" placeholder="e.g. Vanguard, Fidelity, Schwab" value={f.institution} onChange={e=>setF(x=>({...x,institution:e.target.value}))}/>
+          <label className="lbl-sm">Account Number (last 4)</label>
+          <input className="fi-sm" placeholder="e.g. 4821" value={f.accountNum} onChange={e=>setF(x=>({...x,accountNum:e.target.value}))}/>
+          <label className="lbl-sm">Account Owner</label>
+          <input className="fi-sm" placeholder="e.g. John Smith" value={f.owner} onChange={e=>setF(x=>({...x,owner:e.target.value}))}/>
+          <label className="lbl-sm">Current Balance ($)</label>
+          <input className="fi-sm" type="number" placeholder="0.00" step="0.01" min="0" value={f.balance} onChange={e=>setF(x=>({...x,balance:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&go()}/>
+          <button style={{width:"100%",background:"#2563EB",color:"white",border:"none",borderRadius:9,padding:"12px",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}} onClick={go}>
+            {existing?"Save Changes":"Add Account"} →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BULK REIMBURSEMENT MODAL
+// ═══════════════════════════════════════════════════════════════════
+function BulkReimbModal({ count, total, accts, onConfirm, onClose }) {
+  const f$ = n => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n);
+  const [from, setFrom] = useState(accts.length>0 ? accts[0].name : "");
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [custom, setCustom] = useState("");
+  const useCustom = from === "__custom__";
+  const finalFrom = useCustom ? custom : from;
+
+  return (
+    <div className="mov-sm" onClick={onClose}>
+      <div className="mbox-sm" onClick={e=>e.stopPropagation()}>
+        <div className="mhd-sm">
+          <span style={{fontFamily:"Georgia,serif",color:"white",fontSize:15,fontWeight:700}}>✓ Mark {count} Expense{count!==1?"s":""} Reimbursed</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#A0AEC0",cursor:"pointer",fontSize:18,lineHeight:1}}>✕</button>
+        </div>
+        <div className="mbd-sm">
+          <div style={{background:"#F0FDF4",border:"1.5px solid #86EFAC",borderRadius:8,padding:"10px 13px",fontSize:13,color:"#166534",marginBottom:14,textAlign:"center"}}>
+            {count} expense{count!==1?"s":""} · <strong>{f$(total)}</strong> total
+          </div>
+
+          <label className="lbl-sm">Reimburse From (529 Account)</label>
+          {accts.length > 0 ? (
+            <>
+              <select className="fi-sm" value={from} onChange={e=>setFrom(e.target.value)}>
+                {accts.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}
+                <option value="__custom__">Other / type manually…</option>
+              </select>
+              {useCustom && <input className="fi-sm" placeholder="Account name…" value={custom} onChange={e=>setCustom(e.target.value)} autoFocus/>}
+            </>
+          ) : (
+            <input className="fi-sm" placeholder="e.g. Vanguard 529 – Account #4821" value={from} onChange={e=>setFrom(e.target.value)} autoFocus/>
+          )}
+
+          <label className="lbl-sm">Reimbursement Date</label>
+          <input className="fi-sm" type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+
+          <button
+            style={{width:"100%",background:"#059669",color:"white",border:"none",borderRadius:9,padding:"12px",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}}
+            onClick={()=>{ if(!finalFrom.trim()){return;} onConfirm(finalFrom,date); }}
+          >
+            ✓ Confirm Reimbursement
+          </button>
+          <button style={{width:"100%",background:"none",border:"1.5px solid #D1D5DB",borderRadius:9,padding:"11px",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif",color:"#374151",marginTop:8}} onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
