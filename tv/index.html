@@ -59,6 +59,15 @@ header.bar h1{font-size:26px;font-weight:750;letter-spacing:-.02em;flex:1;min-wi
 .next b{color:var(--text);font-weight:600}
 .progress{height:4px;border-radius:4px;background:var(--surface2);margin-top:8px;overflow:hidden}
 .progress>i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.pill{font-size:13px;font-weight:650;padding:2px 9px;border-radius:999px;background:var(--surface2);color:var(--muted);font-variant-numeric:tabular-nums}
+.pill.seen{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.pill.left{background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--text)}
+.air{font-size:14px;margin-top:3px}
+.air b{font-weight:600}
+.air.muted{color:var(--muted)}
+.section-label .n{font-weight:500;opacity:.8}
+.hint{font-size:14px;color:var(--muted);margin:-4px 0 8px}
 .count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;align-self:flex-start;padding-top:2px}
 .empty{text-align:center;color:var(--muted);padding:56px 16px}
 .empty h2{color:var(--text);font-size:20px;margin-bottom:6px}
@@ -184,10 +193,11 @@ function stats(show) {
   const w = show.watched || {};
   const reg = regularEps(show);
   const airedReg = reg.filter(aired);
-  const seen = reg.filter(e => w[e.id]).length;
+  const seen = airedReg.filter(e => w[e.id]).length;
   const next = airedReg.find(e => !w[e.id]);
-  const upcoming = reg.find(e => !aired(e) && !w[e.id]);
-  return { total: airedReg.length, seen: Math.min(seen, Math.max(airedReg.length, seen)), next, upcoming, remaining: airedReg.filter(e => !w[e.id]).length };
+  const upcoming = reg.find(e => !aired(e)); // next new episode to come out
+  return { total: airedReg.length, seen, next, upcoming, remaining: airedReg.length - seen,
+           everWatched: Object.keys(w).length > 0 };
 }
 function posterHtml(img, name, cls = "poster") {
   return img ? `<img class="${cls}" src="${esc(img)}" alt="" loading="lazy">`
@@ -249,8 +259,14 @@ function renderHome() {
 
   const visible = shows.filter(s => filter === "All" || (s.service || "No service set") === filter);
   const withStats = visible.map(s => ({ s, st: stats(s) }));
-  const watching = withStats.filter(x => x.st.next).sort((a, b) => (b.s.lastWatchedAt || 0) - (a.s.lastWatchedAt || 0) || a.s.name.localeCompare(b.s.name));
-  const caught = withStats.filter(x => !x.st.next).sort((a, b) => a.s.name.localeCompare(b.s.name));
+  const byName = (a, b) => (a.s.name || "").localeCompare(b.s.name || "");
+  const bySoonest = (a, b) => (a.st.upcoming?.stamp || a.st.upcoming?.date || "~").localeCompare(b.st.upcoming?.stamp || b.st.upcoming?.date || "~") || byName(a, b);
+  const watching = withStats.filter(x => x.st.everWatched && x.st.next)
+    .sort((a, b) => (b.s.lastWatchedAt || 0) - (a.s.lastWatchedAt || 0) || byName(a, b));
+  const caught = withStats.filter(x => x.st.everWatched && !x.st.next).sort(bySoonest);
+  const notStarted = withStats.filter(x => !x.st.everWatched).sort(byName);
+  const section = (title, hint, list) => list.length
+    ? `<div class="section-label">${title} <span class="n">${list.length}</span></div>${hint ? `<p class="hint">${hint}</p>` : ""}<div class="list">${list.map(cardHtml).join("")}</div>` : "";
 
   app.innerHTML = `
     <header class="bar">
@@ -260,8 +276,9 @@ function renderHome() {
     </header>
     ${shows.length ? `
       ${services.length > 1 ? `<div class="chips">${["All", ...services].map(s => `<button class="chip ${s === filter ? "on" : ""}" data-f="${esc(s)}">${esc(s)}</button>`).join("")}</div>` : ""}
-      ${watching.length ? `<div class="section-label">Up next</div><div class="list">${watching.map(cardHtml).join("")}</div>` : ""}
-      ${caught.length ? `<div class="section-label">Caught up</div><div class="list">${caught.map(cardHtml).join("")}</div>` : ""}
+      ${section("Watching", "", watching)}
+      ${section("Caught up", "", caught)}
+      ${section("Haven't started", "Saved for later. Check off an episode and it moves up to Watching.", notStarted)}
     ` : `
       <div class="empty">
         <h2>No shows yet</h2>
@@ -278,21 +295,36 @@ function renderHome() {
   // quietly refresh stale shows (new episodes) in the background
   backgroundRefresh();
 }
+function airLabel(e) {
+  if (!e.date) return "date not announced yet";
+  const d = new Date(e.date + "T12:00:00"), now = new Date();
+  const days = Math.round((new Date(e.date + "T00:00:00") - new Date(today() + "T00:00:00")) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  const opts = { weekday: "short", month: "short", day: "numeric" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(undefined, opts) + (days < 7 ? ` (in ${days} days)` : "");
+}
 function cardHtml({ s, st }) {
-  let line;
-  if (st.next) line = `Next: <b>${esc(code(st.next))}</b> · ${esc(st.next.name)}${st.remaining > 1 ? ` <span>(+${st.remaining - 1} more)</span>` : ""}`;
-  else if (st.upcoming) line = `Caught up · <b>${esc(code(st.upcoming))}</b> ${st.upcoming.date ? "airs " + esc(fmtDate(st.upcoming.date)) : "coming"}`;
-  else line = s.status === "Ended" ? "Finished · show has ended" : "Caught up";
+  const started = st.everWatched;
+  const counts = started
+    ? `<span class="pill seen">✓ ${st.seen} seen</span>` + (st.remaining ? `<span class="pill left">${st.remaining} left</span>` : `<span class="pill">all caught up</span>`)
+    : `<span class="pill left">${st.total} episode${st.total === 1 ? "" : "s"}</span>`;
+  const nextUp = started && st.next ? `<div class="next">Up next: <b>${esc(code(st.next))}</b> · ${esc(st.next.name)}</div>` : "";
+  const air = st.upcoming
+    ? `<div class="air"><b>New episode:</b> ${esc(airLabel(st.upcoming))}</div>`
+    : `<div class="air muted">${s.status === "Ended" ? "Series has ended" : "No new episodes announced"}</div>`;
   const pct = st.total ? Math.round(st.seen / st.total * 100) : 0;
   return `<button class="card" data-show="${s.id}">
     ${posterHtml(s.image, s.name)}
     <div class="meta">
       <div class="name">${esc(s.name)}</div>
       <span class="svc ${s.service ? "" : "none"}">${esc(s.service || "No service set")}</span>
-      <div class="next">${line}</div>
-      <div class="progress"><i style="width:${pct}%"></i></div>
+      <div class="pills">${counts}</div>
+      ${nextUp}
+      ${air}
+      ${started ? `<div class="progress"><i style="width:${pct}%"></i></div>` : ""}
     </div>
-    <div class="count">${st.seen}/${st.total}</div>
   </button>`;
 }
 let refreshing = false;
