@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>My Shows</title>
+<meta name="description" content="Track the TV shows I'm watching, where they stream, and which episodes I've seen.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="My Shows">
+<meta name="theme-color" content="#14161c">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2314161c'/%3E%3Crect x='30' y='48' width='120' height='80' rx='12' fill='none' stroke='%23f5b942' stroke-width='10'/%3E%3Cpath d='M70 150h40M90 128v22' stroke='%23f5b942' stroke-width='10' stroke-linecap='round'/%3E%3Cpath d='M78 72l28 16-28 16z' fill='%23f5b942'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f4f3f0; --surface:#ffffff; --surface2:#ecebe7; --text:#17181c; --muted:#6b6d75;
+  --line:#dddcd7; --accent:#c98a12; --accent-ink:#ffffff; --good:#2f8a4f; --danger:#c0392b;
+  --shadow:0 1px 2px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14161c; --surface:#1d2028; --surface2:#262a34; --text:#eceef2; --muted:#9a9eaa;
+    --line:#2e323d; --accent:#f5b942; --accent-ink:#1a1406; --good:#5cc27f; --danger:#ff6b5b;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14161c; --surface:#1d2028; --surface2:#262a34; --text:#eceef2; --muted:#9a9eaa;
+  --line:#2e323d; --accent:#f5b942; --accent-ink:#1a1406; --good:#5cc27f; --danger:#ff6b5b;
+  --shadow:none;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text)}
+body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent;
+  padding:env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 24px);min-height:100vh}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,select{font:inherit;color:inherit}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px}
+header.bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 0 10px;display:flex;align-items:center;gap:10px}
+header.bar h1{font-size:26px;font-weight:750;letter-spacing:-.02em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:999px;
+  background:var(--accent);color:var(--accent-ink);font-weight:650;white-space:nowrap}
+.btn.ghost{background:var(--surface2);color:var(--text)}
+.btn.small{height:32px;padding:0 12px;font-size:14px}
+.btn.danger{background:transparent;color:var(--danger);border:1px solid var(--line)}
+.icon-btn{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface2);flex:none}
+.icon-btn svg{width:20px;height:20px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;height:32px;padding:0 14px;border-radius:999px;background:var(--surface2);font-size:14px;font-weight:550;color:var(--muted)}
+.chip.on{background:var(--text);color:var(--bg)}
+.list{display:flex;flex-direction:column;gap:10px}
+.card{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px;box-shadow:var(--shadow);text-align:left;width:100%}
+.poster{width:56px;height:80px;border-radius:8px;object-fit:cover;background:var(--surface2);flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px;font-weight:700;overflow:hidden}
+.card .meta{flex:1;min-width:0}
+.card .name{font-weight:650;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svc{display:inline-block;font-size:12px;font-weight:650;padding:2px 8px;border-radius:6px;background:var(--surface2);color:var(--text);margin-top:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.svc.none{color:var(--muted);font-weight:500}
+.next{font-size:14px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.next b{color:var(--text);font-weight:600}
+.progress{height:4px;border-radius:4px;background:var(--surface2);margin-top:8px;overflow:hidden}
+.progress>i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;align-self:flex-start;padding-top:2px}
+.empty{text-align:center;color:var(--muted);padding:56px 16px}
+.empty h2{color:var(--text);font-size:20px;margin-bottom:6px}
+.empty .btn{margin-top:18px}
+.search{display:flex;gap:8px;margin-bottom:14px}
+.search input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface);padding:0 14px;font-size:17px}
+.search input:focus,.field input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.result .btn{flex:none}
+.sub{font-size:14px;color:var(--muted)}
+.hero{display:flex;gap:14px;margin:4px 0 16px}
+.hero .poster{width:96px;height:138px;border-radius:10px}
+.hero .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.hero h2{font-size:22px;line-height:1.2}
+.field label{display:block;font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+.field input{width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);padding:0 12px}
+.season{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
+.season-head{display:flex;align-items:center;gap:10px;padding:12px 14px;width:100%;text-align:left}
+.season-head .t{flex:1;font-weight:650}
+.season-head .sub{font-variant-numeric:tabular-nums}
+.chev{transition:transform .15s;color:var(--muted);width:18px;height:18px}
+.season.open .chev{transform:rotate(90deg)}
+.eps{display:none;border-top:1px solid var(--line)}
+.season.open .eps{display:block}
+.season-tools{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.ep{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.ep:last-child{border-bottom:0}
+.ep .num{font-size:13px;color:var(--muted);width:30px;flex:none;font-variant-numeric:tabular-nums}
+.ep .body{flex:1;min-width:0}
+.ep .title{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ep .date{font-size:13px;color:var(--muted)}
+.ep.future{opacity:.55}
+.ep.seen .title{color:var(--muted)}
+.check{width:32px;height:32px;border-radius:999px;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center}
+.check svg{width:16px;height:16px;opacity:0}
+.ep.seen .check{background:var(--good);border-color:var(--good);color:#fff}
+.ep.seen .check svg{opacity:1}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);z-index:20;
+  background:var(--text);color:var(--bg);border-radius:14px;padding:10px 10px 10px 16px;display:flex;align-items:center;gap:12px;
+  width:calc(100% - 32px);max-width:480px;font-size:15px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast span{flex:1}
+.toast .btn{background:var(--accent);color:var(--accent-ink)}
+.toast .x{color:var(--bg);opacity:.7;padding:0 6px;height:32px}
+.menu{position:fixed;inset:0;z-index:15;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom) + 18px);display:flex;flex-direction:column;gap:10px}
+.sheet h3{font-size:18px}
+.sheet .btn{width:100%;height:46px}
+.sheet p{color:var(--muted);font-size:14px}
+.spinner{width:22px;height:22px;border:3px solid var(--surface2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:40px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err{color:var(--danger);padding:16px 0}
+.section-label{font-size:13px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="overlay"></div>
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+<script>
+(() => {
+"use strict";
+
+/* ---------- storage ---------- */
+const KEY = "myshows-v1";
+const STALE_MS = 12 * 60 * 60 * 1000; // refresh episode lists twice a day at most
+let db = loadDb();
+function loadDb() {
+  try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && v.shows) return v; } catch {}
+  return { shows: {} };
+}
+function saveDb() {
+  try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast("Couldn't save — storage is full or blocked."); }
+}
+
+/* ---------- TVMaze API (free, no key) ---------- */
+const API = "https://api.tvmaze.com";
+async function api(path) {
+  const r = await fetch(API + path);
+  if (r.status === 429) { await new Promise(res => setTimeout(res, 1500)); return api(path); }
+  if (!r.ok) throw new Error("TVMaze returned " + r.status);
+  return r.json();
+}
+const serviceOf = s => (s.webChannel && s.webChannel.name) || (s.network && s.network.name) || "";
+function slimEpisodes(list) {
+  return (list || []).map(e => ({
+    id: e.id, s: e.season, n: e.number, name: e.name || "TBA",
+    date: e.airdate || "", stamp: e.airstamp || "", special: e.number == null || e.type === "significant_special" || e.type === "insignificant_special"
+  }));
+}
+async function fetchShow(id) {
+  const s = await api(`/shows/${id}?embed=episodes`);
+  return {
+    name: s.name,
+    image: s.image ? (s.image.medium || s.image.original) : "",
+    status: s.status || "",
+    year: (s.premiered || "").slice(0, 4),
+    defaultService: serviceOf(s),
+    episodes: slimEpisodes(s._embedded && s._embedded.episodes),
+    fetchedAt: Date.now()
+  };
+}
+async function refreshShow(id, force) {
+  const show = db.shows[id];
+  if (!show) return false;
+  if (!force && show.fetchedAt && Date.now() - show.fetchedAt < STALE_MS) return false;
+  const fresh = await fetchShow(id);
+  Object.assign(db.shows[id], fresh); // keeps service + watched
+  saveDb();
+  return true;
+}
+
+/* ---------- helpers ---------- */
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const today = () => new Date().toISOString().slice(0, 10);
+const aired = e => {
+  if (e.stamp) return new Date(e.stamp).getTime() <= Date.now();
+  return !!e.date && e.date <= today();
+};
+const code = e => e.n == null ? `S${e.s} Special` : `S${e.s}E${e.n}`;
+const fmtDate = d => d ? new Date(d + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Date TBA";
+const regularEps = show => show.episodes.filter(e => !e.special);
+function stats(show) {
+  const w = show.watched || {};
+  const reg = regularEps(show);
+  const airedReg = reg.filter(aired);
+  const seen = reg.filter(e => w[e.id]).length;
+  const next = airedReg.find(e => !w[e.id]);
+  const upcoming = reg.find(e => !aired(e) && !w[e.id]);
+  return { total: airedReg.length, seen: Math.min(seen, Math.max(airedReg.length, seen)), next, upcoming, remaining: airedReg.filter(e => !w[e.id]).length };
+}
+function posterHtml(img, name, cls = "poster") {
+  return img ? `<img class="${cls}" src="${esc(img)}" alt="" loading="lazy">`
+             : `<div class="${cls}">${esc((name || "?").trim().charAt(0).toUpperCase())}</div>`;
+}
+const ICON = {
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>'
+};
+
+/* ---------- toast / sheet ---------- */
+let toastTimer;
+function toast(msg, actionLabel, action) {
+  clearTimeout(toastTimer);
+  const ov = $("#overlay");
+  ov.querySelector(".toast")?.remove();
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<span>${esc(msg)}</span>${actionLabel ? `<button class="btn small">${esc(actionLabel)}</button>` : ""}<button class="x" aria-label="Dismiss">✕</button>`;
+  ov.appendChild(t);
+  const close = () => t.remove();
+  t.querySelector(".x").onclick = close;
+  if (actionLabel) t.querySelector(".btn").onclick = () => { close(); action(); };
+  toastTimer = setTimeout(close, actionLabel ? 7000 : 3000);
+}
+function sheet(html, bind) {
+  const ov = $("#overlay");
+  const m = document.createElement("div");
+  m.className = "menu";
+  m.innerHTML = `<div class="sheet">${html}<button class="btn ghost" data-close>Cancel</button></div>`;
+  m.onclick = e => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); };
+  ov.appendChild(m);
+  bind && bind(m, () => m.remove());
+}
+
+/* ---------- routing ---------- */
+const app = $("#app");
+let filter = "All";
+let openSeasons = {}; // showId -> Set of open season numbers
+window.addEventListener("hashchange", render);
+function go(hash) { location.hash = hash; }
+function render() {
+  const h = location.hash.replace(/^#\/?/, "");
+  window.scrollTo(0, 0);
+  if (h === "add") return renderAdd();
+  const m = h.match(/^show\/(\d+)$/);
+  if (m && db.shows[m[1]]) return renderShow(m[1]);
+  renderHome();
+}
+
+/* ---------- home ---------- */
+function renderHome() {
+  const shows = Object.values(db.shows);
+  const services = [...new Set(shows.map(s => s.service || "No service set"))].sort((a, b) => a.localeCompare(b));
+  if (filter !== "All" && !services.includes(filter)) filter = "All";
+
+  const visible = shows.filter(s => filter === "All" || (s.service || "No service set") === filter);
+  const withStats = visible.map(s => ({ s, st: stats(s) }));
+  const watching = withStats.filter(x => x.st.next).sort((a, b) => (b.s.lastWatchedAt || 0) - (a.s.lastWatchedAt || 0) || a.s.name.localeCompare(b.s.name));
+  const caught = withStats.filter(x => !x.st.next).sort((a, b) => a.s.name.localeCompare(b.s.name));
+
+  app.innerHTML = `
+    <header class="bar">
+      <h1>My Shows</h1>
+      <button class="icon-btn" id="menuBtn" aria-label="Menu">${ICON.more}</button>
+      <button class="btn" id="addBtn">${ICON.plus.replace("<svg", '<svg width="18" height="18"')} Add show</button>
+    </header>
+    ${shows.length ? `
+      ${services.length > 1 ? `<div class="chips">${["All", ...services].map(s => `<button class="chip ${s === filter ? "on" : ""}" data-f="${esc(s)}">${esc(s)}</button>`).join("")}</div>` : ""}
+      ${watching.length ? `<div class="section-label">Up next</div><div class="list">${watching.map(cardHtml).join("")}</div>` : ""}
+      ${caught.length ? `<div class="section-label">Caught up</div><div class="list">${caught.map(cardHtml).join("")}</div>` : ""}
+    ` : `
+      <div class="empty">
+        <h2>No shows yet</h2>
+        <p>Add the shows you're watching and check off episodes as you go.</p>
+        <button class="btn" id="addBtn2">${ICON.plus.replace("<svg", '<svg width="18" height="18"')} Add your first show</button>
+      </div>`}
+  `;
+  $("#addBtn").onclick = () => go("/add");
+  $("#addBtn2") && ($("#addBtn2").onclick = () => go("/add"));
+  $("#menuBtn").onclick = openMainMenu;
+  app.querySelectorAll(".chip").forEach(c => c.onclick = () => { filter = c.dataset.f; renderHome(); });
+  app.querySelectorAll("[data-show]").forEach(c => c.onclick = () => go("/show/" + c.dataset.show));
+
+  // quietly refresh stale shows (new episodes) in the background
+  backgroundRefresh();
+}
+function cardHtml({ s, st }) {
+  let line;
+  if (st.next) line = `Next: <b>${esc(code(st.next))}</b> · ${esc(st.next.name)}${st.remaining > 1 ? ` <span>(+${st.remaining - 1} more)</span>` : ""}`;
+  else if (st.upcoming) line = `Caught up · <b>${esc(code(st.upcoming))}</b> ${st.upcoming.date ? "airs " + esc(fmtDate(st.upcoming.date)) : "coming"}`;
+  else line = s.status === "Ended" ? "Finished · show has ended" : "Caught up";
+  const pct = st.total ? Math.round(st.seen / st.total * 100) : 0;
+  return `<button class="card" data-show="${s.id}">
+    ${posterHtml(s.image, s.name)}
+    <div class="meta">
+      <div class="name">${esc(s.name)}</div>
+      <span class="svc ${s.service ? "" : "none"}">${esc(s.service || "No service set")}</span>
+      <div class="next">${line}</div>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+    </div>
+    <div class="count">${st.seen}/${st.total}</div>
+  </button>`;
+}
+let refreshing = false;
+async function backgroundRefresh() {
+  if (refreshing) return;
+  refreshing = true;
+  let changed = false;
+  for (const id of Object.keys(db.shows)) {
+    try { if (await refreshShow(id)) changed = true; } catch {}
+  }
+  refreshing = false;
+  if (changed && !location.hash.replace(/^#\/?/, "")) renderHome();
+}
+
+function openMainMenu() {
+  sheet(`
+    <h3>Backup</h3>
+    <p>Your shows are saved in this browser only. Export a backup file to keep them safe or move them to another device.</p>
+    <button class="btn" data-a="export">Export backup</button>
+    <button class="btn ghost" data-a="import">Import backup</button>
+  `, (m, close) => {
+    m.querySelector('[data-a="export"]').onclick = () => { exportBackup(); close(); };
+    m.querySelector('[data-a="import"]').onclick = () => { close(); $("#importFile").click(); };
+  });
+}
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(db, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `my-shows-backup-${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$("#importFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!data || typeof data.shows !== "object") throw 0;
+    const n = Object.keys(data.shows).length;
+    if (!confirm(`Replace your current list with ${n} show${n === 1 ? "" : "s"} from this backup?`)) return;
+    db = data; saveDb(); render(); toast("Backup restored.");
+  } catch { toast("That file isn't a My Shows backup."); }
+};
+
+/* ---------- add ---------- */
+let lastQuery = "", lastResults = null;
+function renderAdd() {
+  app.innerHTML = `
+    <header class="bar">
+      <button class="icon-btn" id="back" aria-label="Back">${ICON.back}</button>
+      <h1>Add a show</h1>
+    </header>
+    <form class="search" id="searchForm">
+      <input id="q" type="search" placeholder="Show name" autocomplete="off" enterkeyhint="search" value="${esc(lastQuery)}">
+      <button class="btn" type="submit">Search</button>
+    </form>
+    <div id="results"></div>
+  `;
+  $("#back").onclick = () => go("/");
+  const q = $("#q");
+  setTimeout(() => q.focus(), 50);
+  let timer;
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => search(q.value), 350); };
+  $("#searchForm").onsubmit = e => { e.preventDefault(); clearTimeout(timer); search(q.value); q.blur(); };
+  if (lastResults) drawResults(lastResults);
+}
+let searchSeq = 0;
+async function search(text) {
+  text = text.trim();
+  lastQuery = text;
+  const out = $("#results");
+  if (!text) { out.innerHTML = ""; lastResults = null; return; }
+  const seq = ++searchSeq;
+  out.innerHTML = `<div class="spinner"></div>`;
+  try {
+    const res = await api(`/search/shows?q=${encodeURIComponent(text)}`);
+    if (seq !== searchSeq) return;
+    lastResults = res.map(r => r.show);
+    drawResults(lastResults);
+  } catch (e) {
+    if (seq !== searchSeq) return;
+    out.innerHTML = `<p class="err">Couldn't search right now. Check your connection and try again.</p>`;
+  }
+}
+function drawResults(list) {
+  const out = $("#results");
+  if (!list.length) { out.innerHTML = `<p class="empty">No shows found by that name.</p>`; return; }
+  out.innerHTML = `<div class="list">${list.map(s => {
+    const have = !!db.shows[s.id];
+    const yr = (s.premiered || "").slice(0, 4);
+    const ended = s.ended ? s.ended.slice(0, 4) : "";
+    const span = yr ? (s.status === "Ended" && ended && ended !== yr ? `${yr}–${ended}` : s.status === "Running" ? `${yr}–` : yr) : "";
+    const svc = serviceOf(s);
+    return `<div class="card result">
+      ${posterHtml(s.image && (s.image.medium || s.image.original), s.name)}
+      <div class="meta">
+        <div class="name">${esc(s.name)}</div>
+        <div class="sub">${[span, svc].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</div>
+      </div>
+      ${have ? `<button class="btn ghost small" data-open="${s.id}">Added ✓</button>` : `<button class="btn small" data-add="${s.id}">Add</button>`}
+    </div>`;
+  }).join("")}</div>`;
+  out.querySelectorAll("[data-open]").forEach(b => b.onclick = () => go("/show/" + b.dataset.open));
+  out.querySelectorAll("[data-add]").forEach(b => b.onclick = () => addShow(b.dataset.add, b));
+}
+async function addShow(id, btn) {
+  btn.disabled = true; btn.textContent = "Adding…";
+  try {
+    const data = await fetchShow(id);
+    db.shows[id] = { id: Number(id), service: data.defaultService, watched: {}, addedAt: Date.now(), ...data };
+    saveDb();
+    go("/show/" + id);
+  } catch {
+    btn.disabled = false; btn.textContent = "Add";
+    toast("Couldn't add that show. Try again.");
+  }
+}
+
+/* ---------- show detail ---------- */
+function renderShow(id) {
+  const show = db.shows[id];
+  show.watched = show.watched || {};
+  const st = stats(show);
+  const seasons = new Map();
+  for (const e of show.episodes) {
+    if (!seasons.has(e.s)) seasons.set(e.s, []);
+    seasons.get(e.s).push(e);
+  }
+  // default: open the season holding the next episode
+  if (!openSeasons[id]) openSeasons[id] = new Set([st.next ? st.next.s : st.upcoming ? st.upcoming.s : [...seasons.keys()].pop()]);
+  const open = openSeasons[id];
+
+  app.innerHTML = `
+    <header class="bar">
+      <button class="icon-btn" id="back" aria-label="Back">${ICON.back}</button>
+      <h1>${esc(show.name)}</h1>
+      <button class="icon-btn" id="more" aria-label="Show options">${ICON.more}</button>
+    </header>
+    <div class="hero">
+      ${posterHtml(show.image, show.name)}
+      <div class="info">
+        <div class="sub">${[show.year, show.status].filter(Boolean).map(esc).join(" · ")}</div>
+        <div class="field">
+          <label for="svc">Watching on</label>
+          <input id="svc" list="svcList" value="${esc(show.service || "")}" placeholder="e.g. Netflix">
+          <datalist id="svcList">${knownServices().map(s => `<option value="${esc(s)}">`).join("")}</datalist>
+        </div>
+        <div class="sub" id="summary">${st.seen} of ${st.total} aired episodes watched</div>
+      </div>
+    </div>
+    ${show.episodes.length ? "" : `<p class="empty">No episode info listed yet.</p>`}
+    <div id="seasons">${[...seasons.entries()].map(([n, eps]) => seasonHtml(show, n, eps, open.has(n))).join("")}</div>
+  `;
+  $("#back").onclick = () => go("/");
+  $("#more").onclick = () => showMenu(id);
+  const svc = $("#svc");
+  svc.onchange = svc.onblur = () => {
+    const v = svc.value.trim();
+    if (v !== (show.service || "")) { show.service = v; saveDb(); }
+  };
+  bindSeasons(id);
+
+  refreshShow(id).then(changed => { if (changed && location.hash === "#/show/" + id) renderShow(id); }).catch(() => {});
+}
+function knownServices() {
+  const base = ["Netflix", "Hulu", "Max", "Disney+", "Prime Video", "Apple TV+", "Peacock", "Paramount+", "YouTube TV", "Cable / Live TV"];
+  const mine = Object.values(db.shows).map(s => s.service).filter(Boolean);
+  return [...new Set([...mine, ...base])];
+}
+function seasonHtml(show, n, eps, isOpen) {
+  const w = show.watched;
+  const airedEps = eps.filter(e => !e.special && aired(e));
+  const seen = eps.filter(e => !e.special && w[e.id]).length;
+  const done = airedEps.length > 0 && airedEps.every(e => w[e.id]);
+  return `<div class="season ${isOpen ? "open" : ""}" data-season="${n}">
+    <button class="season-head">${ICON.chev}<span class="t">Season ${n}</span>
+      <span class="sub">${done ? `<span style="color:var(--good)">✓ ${seen}/${airedEps.length}</span>` : `${seen}/${airedEps.length}`}</span></button>
+    <div class="eps">
+      ${airedEps.length ? `<div class="season-tools">
+        ${done ? `<button class="btn ghost small" data-season-act="unwatch">Unmark season</button>`
+               : `<button class="btn ghost small" data-season-act="watch">Mark season watched</button>`}
+      </div>` : ""}
+      ${eps.map(e => {
+        const fut = !aired(e);
+        return `<div class="ep ${w[e.id] ? "seen" : ""} ${fut ? "future" : ""}" data-ep="${e.id}">
+          <div class="num">${e.n == null ? "SP" : "E" + e.n}</div>
+          <div class="body"><div class="title">${esc(e.name)}</div><div class="date">${fut ? "Airs " : ""}${esc(fmtDate(e.date))}</div></div>
+          <button class="check" aria-label="Watched">${ICON.check}</button>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+function bindSeasons(id) {
+  const show = db.shows[id];
+  const root = $("#seasons");
+  root.querySelectorAll(".season").forEach(sec => {
+    const n = Number(sec.dataset.season);
+    sec.querySelector(".season-head").onclick = () => {
+      sec.classList.toggle("open");
+      sec.classList.contains("open") ? openSeasons[id].add(n) : openSeasons[id].delete(n);
+    };
+    sec.querySelectorAll("[data-season-act]").forEach(b => b.onclick = () => {
+      const eps = show.episodes.filter(e => e.s === n && !e.special && aired(e));
+      if (b.dataset.seasonAct === "watch") eps.forEach(e => show.watched[e.id] = Date.now());
+      else eps.forEach(e => delete show.watched[e.id]);
+      show.lastWatchedAt = Date.now();
+      saveDb(); redrawSeasons(id);
+    });
+  });
+  root.querySelectorAll(".ep .check").forEach(c => c.onclick = () => toggleEp(id, Number(c.closest(".ep").dataset.ep)));
+}
+function redrawSeasons(id) {
+  const show = db.shows[id];
+  const y = window.scrollY;
+  const seasons = new Map();
+  for (const e of show.episodes) { if (!seasons.has(e.s)) seasons.set(e.s, []); seasons.get(e.s).push(e); }
+  $("#seasons").innerHTML = [...seasons.entries()].map(([n, eps]) => seasonHtml(show, n, eps, openSeasons[id].has(n))).join("");
+  const st = stats(show);
+  $("#summary").textContent = `${st.seen} of ${st.total} aired episodes watched`;
+  bindSeasons(id);
+  window.scrollTo(0, y);
+}
+function toggleEp(id, epId) {
+  const show = db.shows[id];
+  const w = show.watched;
+  if (w[epId]) { delete w[epId]; saveDb(); redrawSeasons(id); return; }
+  w[epId] = Date.now();
+  show.lastWatchedAt = Date.now();
+  saveDb(); redrawSeasons(id);
+  // offer to fill in earlier unwatched episodes
+  const idx = show.episodes.findIndex(e => e.id === epId);
+  const earlier = show.episodes.slice(0, idx).filter(e => !e.special && aired(e) && !w[e.id]);
+  if (earlier.length) {
+    toast(`Also mark the ${earlier.length} earlier episode${earlier.length === 1 ? "" : "s"} as watched?`, "Mark them", () => {
+      earlier.forEach(e => w[e.id] = Date.now());
+      saveDb(); redrawSeasons(id);
+    });
+  }
+}
+function showMenu(id) {
+  const show = db.shows[id];
+  sheet(`
+    <h3>${esc(show.name)}</h3>
+    <button class="btn ghost" data-a="refresh">Check for new episodes</button>
+    <button class="btn danger" data-a="remove">Remove show</button>
+  `, (m, close) => {
+    m.querySelector('[data-a="refresh"]').onclick = async e => {
+      e.target.textContent = "Checking…";
+      try { await refreshShow(id, true); close(); renderShow(id); toast("Episode list updated."); }
+      catch { close(); toast("Couldn't reach TVMaze. Try again later."); }
+    };
+    m.querySelector('[data-a="remove"]').onclick = () => {
+      close();
+      const backup = db.shows[id];
+      delete db.shows[id]; saveDb(); go("/");
+      toast(`Removed ${backup.name}.`, "Undo", () => { db.shows[id] = backup; saveDb(); render(); });
+    };
+  });
+}
+
+render();
+})();
+</script>
+</body>
+</html>
