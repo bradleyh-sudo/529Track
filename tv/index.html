@@ -118,6 +118,7 @@ header.bar h1{font-size:26px;font-weight:750;letter-spacing:-.02em;flex:1;min-wi
 .spinner{width:22px;height:22px;border:3px solid var(--surface2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:40px auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 .err{color:var(--danger);padding:16px 0}
+.err p{color:var(--muted);font-size:14px;margin-top:6px}
 .section-label{font-size:13px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
 </style>
 </head>
@@ -143,9 +144,18 @@ function saveDb() {
 
 /* ---------- TVMaze API (free, no key) ---------- */
 const API = "https://api.tvmaze.com";
-async function api(path) {
-  const r = await fetch(API + path);
-  if (r.status === 429) { await new Promise(res => setTimeout(res, 1500)); return api(path); }
+class NetError extends Error {}
+async function api(path, tries = 0) {
+  let r;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
+    r = await fetch(API + path, { signal: ctl.signal });
+    clearTimeout(timer);
+  } catch (e) {
+    throw new NetError(e && e.name === "AbortError" ? "timeout" : "blocked");
+  }
+  if (r.status === 429 && tries < 3) { await new Promise(res => setTimeout(res, 1500)); return api(path, tries + 1); }
   if (!r.ok) throw new Error("TVMaze returned " + r.status);
   return r.json();
 }
@@ -370,6 +380,15 @@ $("#importFile").onchange = async e => {
   } catch { toast("That file isn't a My Shows backup."); }
 };
 
+function netProblem(e) {
+  if (!navigator.onLine) return `<b>You're offline.</b><p>Connect to the internet and try again.</p>`;
+  if (e instanceof NetError && e.message === "timeout") return `<b>The show database didn't answer.</b><p>It may be busy. Try again in a minute.</p>`;
+  if (e instanceof NetError) return `<b>This page isn't allowed to go online from where it's open.</b>
+    <p>Searching needs to reach the show database (tvmaze.com). Previews (inside the Claude app, email, or the Files app)
+    block that. Open the page in Safari or Chrome instead, or from its web address once it's hosted.</p>`;
+  return `<b>Search failed.</b><p>${esc(e.message || "Unknown error")}. Try again in a minute.</p>`;
+}
+
 /* ---------- add ---------- */
 let lastQuery = "", lastResults = null;
 function renderAdd() {
@@ -407,7 +426,7 @@ async function search(text) {
     drawResults(lastResults);
   } catch (e) {
     if (seq !== searchSeq) return;
-    out.innerHTML = `<p class="err">Couldn't search right now. Check your connection and try again.</p>`;
+    out.innerHTML = `<div class="err">${netProblem(e)}</div>`;
   }
 }
 function drawResults(list) {
