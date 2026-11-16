@@ -68,6 +68,17 @@ header.bar h1{font-size:26px;font-weight:750;letter-spacing:-.02em;flex:1;min-wi
 .air.muted{color:var(--muted)}
 .section-label .n{font-weight:500;opacity:.8}
 .hint{font-size:14px;color:var(--muted);margin:-4px 0 8px}
+.svc{display:inline-flex;align-items:center;gap:6px}
+.svc-ico{display:inline-flex;align-items:center;justify-content:center;border-radius:22%;font-weight:800;letter-spacing:-.03em;flex:none;line-height:1}
+.svc-row{display:flex;gap:8px;align-items:center}
+.svc-row input{flex:1;min-width:0}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 16px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow)}
+.stat .big{font-size:24px;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .lbl{font-size:13px;font-weight:600}
+.stat .sm{font-size:12px;color:var(--muted)}
+.bottom-actions{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.bottom-actions .btn{height:48px}
 .count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;align-self:flex-start;padding-top:2px}
 .empty{text-align:center;color:var(--muted);padding:56px 16px}
 .empty h2{color:var(--text);font-size:20px;margin-bottom:6px}
@@ -221,6 +232,27 @@ const ICON = {
   chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>'
 };
 
+/* ---------- service badges (simple colored monograms, not official logos) ---------- */
+const SERVICE_STYLE = [
+  [/netflix/i, "N", "#d81f26"], [/hulu/i, "h", "#1ce783", "#0b0c0f"], [/^max$|hbo/i, "M", "#002be7"],
+  [/disney/i, "D+", "#0b2a6f"], [/prime|amazon/i, "P", "#00a8e1"], [/apple/i, "tv", "#000000"],
+  [/peacock/i, "P", "#5a2ca0"], [/paramount|cbs/i, "P+", "#0064ff"], [/youtube/i, "▶", "#ff0000"],
+  [/fx/i, "FX", "#222222"], [/amc/i, "A", "#111111"], [/starz/i, "S", "#111111"], [/showtime/i, "S", "#b10000"],
+  [/abc/i, "abc", "#111111"], [/nbc/i, "N", "#5a2ca0"], [/fox/i, "F", "#003a70"], [/pbs/i, "P", "#2638c4"],
+  [/bbc/i, "B", "#111111"], [/crunchyroll/i, "C", "#f47521"], [/cable|live/i, "TV", "#555b66"]
+];
+function serviceIcon(name, size = 22) {
+  if (!name) return `<span class="svc-ico" style="width:${size}px;height:${size}px;background:var(--surface2);color:var(--muted)">?</span>`;
+  let m = SERVICE_STYLE.find(([re]) => re.test(name));
+  if (!m) {
+    let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    m = [null, name.trim().charAt(0).toUpperCase(), `hsl(${h % 360} 55% 38%)`];
+  }
+  const [, label, bg, fg = "#fff"] = m;
+  const fs = Math.round(size * (label.length > 2 ? .36 : label.length > 1 ? .44 : .58));
+  return `<span class="svc-ico" aria-hidden="true" style="width:${size}px;height:${size}px;background:${bg};color:${fg};font-size:${fs}px">${esc(label)}</span>`;
+}
+
 /* ---------- toast / sheet ---------- */
 let toastTimer;
 function toast(msg, actionLabel, action) {
@@ -329,7 +361,7 @@ function cardHtml({ s, st }) {
     ${posterHtml(s.image, s.name)}
     <div class="meta">
       <div class="name">${esc(s.name)}</div>
-      <span class="svc ${s.service ? "" : "none"}">${esc(s.service || "No service set")}</span>
+      <span class="svc ${s.service ? "" : "none"}">${serviceIcon(s.service, 18)}${esc(s.service || "No service set")}</span>
       <div class="pills">${counts}</div>
       ${nextUp}
       ${air}
@@ -392,6 +424,7 @@ function netProblem(e) {
 /* ---------- add ---------- */
 let lastQuery = "", lastResults = null;
 function renderAdd() {
+  lastQuery = ""; lastResults = null; searchSeq++;
   app.innerHTML = `
     <header class="bar">
       <button class="icon-btn" id="back" aria-label="Back">${ICON.back}</button>
@@ -489,25 +522,47 @@ function renderShow(id) {
         <div class="sub">${[show.year, show.status].filter(Boolean).map(esc).join(" · ")}</div>
         <div class="field">
           <label for="svc">Watching on</label>
-          <input id="svc" list="svcList" value="${esc(show.service || "")}" placeholder="e.g. Netflix">
+          <div class="svc-row"><span id="svcIco">${serviceIcon(show.service, 40)}</span>
+          <input id="svc" list="svcList" value="${esc(show.service || "")}" placeholder="e.g. Netflix"></div>
           <datalist id="svcList">${knownServices().map(s => `<option value="${esc(s)}">`).join("")}</datalist>
         </div>
-        <div class="sub" id="summary">${st.seen} of ${st.total} aired episodes watched</div>
       </div>
     </div>
+    <div class="stats" id="summary">${summaryHtml(show)}</div>
     ${show.episodes.length ? "" : `<p class="empty">No episode info listed yet.</p>`}
     <div id="seasons">${[...seasons.entries()].map(([n, eps]) => seasonHtml(show, n, eps, open.has(n))).join("")}</div>
+    <div class="bottom-actions">
+      <button class="btn" id="addAnother">${ICON.plus.replace("<svg", '<svg width="18" height="18"')} Add another show</button>
+      <button class="btn ghost" id="viewAll">View all shows</button>
+    </div>
   `;
+  $("#addAnother").onclick = () => go("/add");
+  $("#viewAll").onclick = () => go("/");
   $("#back").onclick = () => go("/");
   $("#more").onclick = () => showMenu(id);
   const svc = $("#svc");
   svc.onchange = svc.onblur = () => {
     const v = svc.value.trim();
     if (v !== (show.service || "")) { show.service = v; saveDb(); }
+    $("#svcIco").innerHTML = serviceIcon(v, 40);
   };
   bindSeasons(id);
 
   refreshShow(id).then(changed => { if (changed && location.hash === "#/show/" + id) renderShow(id); }).catch(() => {});
+}
+function summaryHtml(show) {
+  const w = show.watched || {};
+  const reg = regularEps(show);
+  const bySeason = new Map();
+  for (const e of reg) { if (!bySeason.has(e.s)) bySeason.set(e.s, []); bySeason.get(e.s).push(e); }
+  const seasonsDone = [...bySeason.values()].filter(eps => eps.every(e => w[e.id])).length;
+  const watched = reg.filter(e => w[e.id]).length;
+  const airedLeft = reg.filter(e => aired(e) && !w[e.id]).length;
+  const notOut = reg.filter(e => !aired(e)).length;
+  const tile = (big, label, sub) => `<div class="stat"><div class="big">${big}</div><div class="lbl">${label}</div><div class="sm">${sub}</div></div>`;
+  return tile(bySeason.size, bySeason.size === 1 ? "Season" : "Seasons", `${seasonsDone} finished`)
+       + tile(reg.length, reg.length === 1 ? "Episode" : "Episodes", `${watched} watched`)
+       + tile(airedLeft, "Left to watch", notOut ? `+${notOut} not out yet` : "all are out");
 }
 function knownServices() {
   const base = ["Netflix", "Hulu", "Max", "Disney+", "Prime Video", "Apple TV+", "Peacock", "Paramount+", "YouTube TV", "Cable / Live TV"];
@@ -564,7 +619,7 @@ function redrawSeasons(id) {
   for (const e of show.episodes) { if (!seasons.has(e.s)) seasons.set(e.s, []); seasons.get(e.s).push(e); }
   $("#seasons").innerHTML = [...seasons.entries()].map(([n, eps]) => seasonHtml(show, n, eps, openSeasons[id].has(n))).join("");
   const st = stats(show);
-  $("#summary").textContent = `${st.seen} of ${st.total} aired episodes watched`;
+  $("#summary").innerHTML = summaryHtml(show);
   bindSeasons(id);
   window.scrollTo(0, y);
 }
