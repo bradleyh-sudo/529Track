@@ -98,7 +98,7 @@ body.has-tabs{padding-bottom:calc(env(safe-area-inset-bottom) + 84px)}
 .tile .art{position:relative;aspect-ratio:2/3;border-radius:10px;overflow:hidden;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:28px;font-weight:700}
 .tile .art img{width:100%;height:100%;object-fit:cover;display:block}
 .tile .rank{position:absolute;left:6px;top:6px;min-width:24px;height:24px;padding:0 6px;border-radius:999px;background:rgba(0,0,0,.72);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.tile .have{position:absolute;right:6px;top:6px;width:24px;height:24px;border-radius:999px;background:var(--good);color:#fff;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.tile .have-old{position:absolute;right:6px;top:6px;width:24px;height:24px;border-radius:999px;background:var(--good);color:#fff;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center}
 .tile .tt{font-size:14px;font-weight:600;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tile .ty{font-size:12px;color:var(--muted)}
 .btn.more{display:flex;margin:18px auto 0}
@@ -146,6 +146,18 @@ a{color:var(--accent)}
 .section-label .cols{margin-left:auto;display:flex;font-size:11px;padding-right:13px}
 .section-label .cols span:first-child{min-width:44px;text-align:right}
 .section-label .cols span:last-child{width:72px;text-align:right}
+.star{flex:none;width:36px;height:36px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted)}
+.star svg{width:22px;height:22px;fill:none;stroke:currentColor}
+.star.on{color:var(--accent)}
+.star.on svg{fill:currentColor}
+.star.sm{width:30px;height:30px;margin-right:-6px}
+.star.sm svg{width:18px;height:18px}
+.card .star{align-self:flex-start}
+.card{cursor:pointer}
+.tile{cursor:pointer}
+.tile .star{position:absolute;right:5px;top:5px;width:34px;height:34px;background:rgba(0,0,0,.55);color:#fff}
+.tile .star.on{color:#f5b942}
+.tile .star.busy svg{animation:spin 1s linear infinite;opacity:.7}
 .count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;flex:none;align-self:flex-start;padding-top:2px}
 .empty{text-align:center;color:var(--muted);padding:56px 16px}
 .empty h2{color:var(--text);font-size:20px;margin-bottom:6px}
@@ -300,6 +312,7 @@ const ICON = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  star: '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linejoin="round"><path d="M12 3.3l2.7 5.5 6 .9-4.35 4.2 1.03 6L12 17.05 6.62 19.9l1.03-6L3.3 9.7l6-.9z"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>'
 };
 
@@ -323,6 +336,28 @@ function serviceIcon(name, size = 22) {
   const fs = Math.round(size * (label.length > 2 ? .36 : label.length > 1 ? .44 : .58));
   return `<span class="svc-ico" aria-hidden="true" style="width:${size}px;height:${size}px;background:${bg};color:${fg};font-size:${fs}px">${esc(label)}</span>`;
 }
+
+function starBtn(on, label, extra = "") {
+  return `<button class="star ${on ? "on" : ""} ${extra}" data-star aria-pressed="${on}" aria-label="${on ? "Remove " + esc(label) + " from my list" : "Add " + esc(label) + " to my list"}">${ICON.star}</button>`;
+}
+// Remove a show or movie from the list, with an Undo.
+function removeItem(kind, id) {
+  const store = kind === "show" ? db.shows : (db.movies = db.movies || {});
+  const backup = store[id];
+  if (!backup) return;
+  delete store[id]; saveDb(); refresh();
+  toast(`Removed ${backup.name || backup.title}.`, "Undo", () => { store[id] = backup; saveDb(); refresh(); });
+}
+function refresh() {
+  const h = location.hash.replace(/^#\/?/, "");
+  if (h === "explore") drawExploreGrid();
+  else if (!h || h === "/") renderHome();
+  else render();
+}
+// Enter/Space on clickable non-button elements
+document.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
+});
 
 /* ---------- toast / sheet ---------- */
 let toastTimer;
@@ -425,9 +460,13 @@ function renderHome() {
   $("#menuBtn").onclick = openMainMenu;
   app.querySelectorAll(".chip").forEach(c => c.onclick = () => { filter = c.dataset.f; renderHome(); });
   app.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { settings().view = b.dataset.view; saveDb(); renderHome(); });
-  app.querySelectorAll("[data-show]").forEach(c => c.onclick = () => go("/show/" + c.dataset.show));
+  app.querySelectorAll("[data-show]").forEach(c => c.onclick = e => {
+    if (e.target.closest("[data-star]")) return removeItem("show", c.dataset.show);
+    go("/show/" + c.dataset.show);
+  });
   app.querySelectorAll("[data-movie]").forEach(c => c.onclick = e => {
     const id = c.dataset.movie;
+    if (e.target.closest("[data-star]")) return removeItem("movie", id);
     if (e.target.closest(".check")) { db.movies[id].watched = !db.movies[id].watched; saveDb(); renderHome(); return; }
     openExploreItem("movie", id);
   });
@@ -455,7 +494,7 @@ function cardHtml({ s, st }) {
     ? `<div class="air"><b>New episode:</b> ${esc(airLabel(st.upcoming))}</div>`
     : `<div class="air muted">${s.status === "Ended" ? "Series has ended" : "No new episodes announced"}</div>`;
   const pct = st.total ? Math.round(st.seen / st.total * 100) : 0;
-  return `<button class="card" data-show="${s.id}">
+  return `<div class="card" data-show="${s.id}" role="button" tabindex="0">
     ${posterHtml(s.image, s.name)}
     <div class="meta">
       <div class="name">${esc(s.name)}</div>
@@ -465,7 +504,8 @@ function cardHtml({ s, st }) {
       ${air}
       ${started ? `<div class="progress"><i style="width:${pct}%"></i></div>` : ""}
     </div>
-  </button>`;
+    ${starBtn(true, s.name)}
+  </div>`;
 }
 let refreshing = false;
 async function backgroundRefresh() {
@@ -611,18 +651,20 @@ function rowHtml({ s, st }) {
     : st.remaining ? `<b>${st.remaining}</b> left` : `<span class="ok">✓</span>`;
   const nextCode = started && st.next ? `<span class="code">${esc(code(st.next))}</span>` : "";
   const when = st.upcoming ? (shortDate(st.upcoming) || "TBA") : (s.status === "Ended" ? "Ended" : "—");
-  return `<button class="row" data-show="${s.id}">
+  return `<div class="row" data-show="${s.id}" role="button" tabindex="0">
     ${serviceIcon(s.service, 18)}
     <span class="rn">${esc(s.name)}${nextCode}</span>
     <span class="rs">${status}</span>
     <span class="rw ${st.upcoming ? "soon" : ""}" title="Next new episode">${esc(when)}</span>
-  </button>`;
+    ${starBtn(true, s.name, "sm")}
+  </div>`;
 }
 function movieRowHtml(m) {
   return `<div class="row ${m.watched ? "seen" : ""}" data-movie="${m.id}" role="button" tabindex="0">
     ${serviceIcon(m.service, 18)}
     <span class="rn">${esc(m.title)}<span class="code">${esc(m.year || "")}</span></span>
     <button class="check sm" aria-label="Watched">${ICON.check}</button>
+    ${starBtn(true, m.title, "sm")}
   </div>`;
 }
 function movieCardHtml(m) {
@@ -634,6 +676,7 @@ function movieCardHtml(m) {
       <div class="next">${[m.year, "Movie"].filter(Boolean).map(esc).join(" · ")}${m.watched ? " · <b>Watched</b>" : ""}</div>
     </div>
     <button class="check" aria-label="Watched">${ICON.check}</button>
+    ${starBtn(true, m.title)}
   </div>`;
 }
 
@@ -784,10 +827,42 @@ async function loadExplore(reset) {
   ex.loading = false;
   drawExploreGrid();
 }
-function inLibrary(type, item) {
-  if (type === "movie") return !!(db.movies && db.movies[item.id]);
-  return Object.values(db.shows).some(s => s.tmdbId === item.id);
+// The library entry for a TMDB item (shows added by search are matched by name + year).
+function libraryEntry(type, item) {
+  if (type === "movie") return (db.movies || {})[item.id] ? { kind: "movie", id: item.id } : null;
+  const shows = Object.values(db.shows);
+  const name = (item.name || "").toLowerCase(), yr = (item.first_air_date || "").slice(0, 4);
+  const s = shows.find(s => s.tmdbId === item.id) || shows.find(s => !s.tmdbId && (s.name || "").toLowerCase() === name && (!yr || !s.year || s.year === yr));
+  return s ? { kind: "show", id: s.id } : null;
 }
+const inLibrary = (type, item) => !!libraryEntry(type, item);
+const tmdbDetails = (type, id) => tmdb(`/${type}/${id}`, { append_to_response: type === "tv" ? "watch/providers,external_ids" : "watch/providers", language: navigator.language || "en-US" });
+const streamingOn = d => (((d["watch/providers"] || {}).results || {})[region()]?.flatrate || []);
+function pickServiceFrom(d) {
+  const names = streamingOn(d).map(p => friendlyProvider(p.provider_name));
+  return ex.prov !== "All" && names.includes(ex.prov) ? ex.prov : names[0] || "";
+}
+// Add a TMDB show/movie to the list. Returns { kind, id, title }.
+async function addFromTmdb(type, id, d) {
+  d = d || await tmdbDetails(type, id);
+  const title = d.title || d.name, year = (d.release_date || d.first_air_date || "").slice(0, 4);
+  if (type === "movie") {
+    db.movies = db.movies || {};
+    db.movies[id] = { id: Number(id), title, year, poster: d.poster_path ? IMG + "w185" + d.poster_path : "", service: pickServiceFrom(d), watched: false, addedAt: Date.now() };
+    saveDb();
+    return { kind: "movie", id: Number(id), title };
+  }
+  const mazeId = await findOnTvMaze(d, title, year);
+  if (!mazeId) throw new Error("notfound");
+  if (!db.shows[mazeId]) {
+    const data = await fetchShow(mazeId);
+    db.shows[mazeId] = { id: mazeId, watched: {}, addedAt: Date.now(), ...data, service: pickServiceFrom(d) || data.defaultService };
+  }
+  db.shows[mazeId].tmdbId = Number(id);
+  saveDb();
+  return { kind: "show", id: mazeId, title };
+}
+const starring = new Set(); // "tv-123" while an add is in progress
 function drawExploreGrid() {
   const grid = $("#exGrid");
   if (!grid) return;
@@ -798,15 +873,20 @@ function drawExploreGrid() {
   const type = ex.type;
   grid.innerHTML = `<div class="grid">${ex.items.map((it, i) => {
     const title = it.title || it.name, date = it.release_date || it.first_air_date || "";
-    return `<button class="tile" data-i="${i}">
+    return `<div class="tile" data-i="${i}" role="button" tabindex="0" aria-label="${esc(title)}">
       <div class="art">${it.poster_path ? `<img src="${IMG}w342${esc(it.poster_path)}" alt="" loading="lazy">` : `<span>${esc(title.charAt(0))}</span>`}
-        ${ex.sort === "popular" ? `<span class="rank">${i + 1}</span>` : ""}${inLibrary(type, it) ? `<span class="have">✓</span>` : ""}</div>
+        ${ex.sort === "popular" ? `<span class="rank">${i + 1}</span>` : ""}
+        ${starBtn(inLibrary(type, it), title, starring.has(type + "-" + it.id) ? "busy" : "")}</div>
       <div class="tt">${esc(title)}</div><div class="ty">${esc(date.slice(0, 4))}${it.vote_average ? ` · ★ ${it.vote_average.toFixed(1)}` : ""}</div>
-    </button>`;
+    </div>`;
   }).join("")}</div>
   ${ex.loading ? `<div class="spinner"></div>` : ex.page < ex.pages && ex.items.length ? `<button class="btn ghost more" id="exMore">Show more</button>` : ""}
   ${!ex.loading && !ex.items.length ? `<p class="empty">Nothing found for that filter.</p>` : ""}`;
-  grid.querySelectorAll("[data-i]").forEach(b => b.onclick = () => openExploreItem(type, ex.items[b.dataset.i].id));
+  grid.querySelectorAll("[data-i]").forEach(b => b.onclick = e => {
+    const it = ex.items[b.dataset.i];
+    if (e.target.closest("[data-star]")) return toggleStar(type, it);
+    openExploreItem(type, it.id);
+  });
   const more = $("#exMore");
   if (more) more.onclick = () => { ex.page++; loadExplore(false); };
 }
@@ -817,7 +897,7 @@ async function openExploreItem(type, id) {
   const stored = type === "movie" ? (db.movies || {})[id] : null;
   let d;
   try {
-    d = await tmdb(`/${type}/${id}`, { append_to_response: type === "tv" ? "watch/providers,external_ids" : "watch/providers", language: navigator.language || "en-US" });
+    d = await tmdbDetails(type, id);
   } catch (e) {
     if (!stored) { content.innerHTML = `<div class="err">${tmdbKey() ? netProblem(e) : "<b>Explore isn't set up.</b>"}</div>`; return; }
     d = { title: stored.title, release_date: stored.year, overview: "", poster_path: null };
@@ -829,7 +909,8 @@ async function openExploreItem(type, id) {
     ? [year, d.number_of_seasons && `${d.number_of_seasons} season${d.number_of_seasons === 1 ? "" : "s"}`, d.number_of_episodes && `${d.number_of_episodes} episodes`]
     : [year, d.runtime && `${Math.floor(d.runtime / 60)}h ${d.runtime % 60}m`];
   if (d.vote_average) facts.push(`★ ${d.vote_average.toFixed(1)}`);
-  const show = type === "tv" ? Object.values(db.shows).find(s => s.tmdbId === Number(id)) : null;
+  const libShow = type === "tv" ? libraryEntry("tv", { id: Number(id), name: title, first_air_date: d.first_air_date || "" }) : null;
+  const show = libShow ? db.shows[libShow.id] : null;
   const movie = type === "movie" ? (db.movies || {})[id] : null;
   content.innerHTML = `
     <div class="detail">
@@ -844,35 +925,39 @@ async function openExploreItem(type, id) {
       ? show ? `<button class="btn" data-a="open">Open in My Shows</button>` : `<button class="btn" data-a="addtv">${ICON.plus.replace("<svg", '<svg width="18" height="18"')} Add to My Shows</button>`
       : movie ? `<button class="btn ghost" data-a="toggle">${movie.watched ? "Mark as not watched" : "Mark as watched"}</button><button class="btn danger" data-a="rmmovie">Remove from my movies</button>`
               : `<button class="btn" data-a="addmovie">${ICON.plus.replace("<svg", '<svg width="18" height="18"')} Add to my movies</button>`}`;
-  const pickService = () => {
-    const names = flat.map(p => friendlyProvider(p.provider_name));
-    return ex.prov !== "All" && names.includes(ex.prov) ? ex.prov : names[0] || "";
-  };
   const btn = a => content.querySelector(`[data-a="${a}"]`);
   btn("open") && (btn("open").onclick = () => { closeSheet(); go("/show/" + show.id); });
   btn("toggle") && (btn("toggle").onclick = () => { movie.watched = !movie.watched; saveDb(); closeSheet(); render(); });
-  btn("rmmovie") && (btn("rmmovie").onclick = () => { delete db.movies[id]; saveDb(); closeSheet(); render(); toast(`Removed ${title}.`); });
-  btn("addmovie") && (btn("addmovie").onclick = () => {
-    db.movies = db.movies || {};
-    db.movies[id] = { id: Number(id), title, year, poster: d.poster_path ? IMG + "w185" + d.poster_path : "", service: pickService(), watched: false, addedAt: Date.now() };
-    saveDb(); closeSheet(); drawExploreGrid(); toast(`Added ${title} to your movies.`, "View", () => go("/"));
+  btn("rmmovie") && (btn("rmmovie").onclick = () => { closeSheet(); removeItem("movie", id); });
+  btn("addmovie") && (btn("addmovie").onclick = async () => {
+    await addFromTmdb("movie", id, d);
+    closeSheet(); refresh(); toast(`Added ${title} to your movies.`);
   });
   btn("addtv") && (btn("addtv").onclick = async () => {
     const b = btn("addtv"); b.disabled = true; b.textContent = "Adding…";
     try {
-      const mazeId = await findOnTvMaze(d, title, year);
-      if (!mazeId) throw new Error("notfound");
-      if (!db.shows[mazeId]) {
-        const data = await fetchShow(mazeId);
-        db.shows[mazeId] = { id: mazeId, watched: {}, addedAt: Date.now(), ...data, service: pickService() || data.defaultService };
-      }
-      db.shows[mazeId].tmdbId = Number(id);
-      saveDb(); closeSheet(); go("/show/" + mazeId);
+      const added = await addFromTmdb("tv", id, d);
+      closeSheet(); go("/show/" + added.id);
     } catch (e) {
       b.disabled = false; b.innerHTML = "Add to My Shows";
       content.querySelector("#itemErr").innerHTML = `<div class="err">${e.message === "notfound" ? "<b>Couldn't find this show's episode list.</b><p>Try adding it from the search on the My Shows tab.</p>" : netProblem(e)}</div>`;
     }
   });
+}
+async function toggleStar(type, it) {
+  const key = type + "-" + it.id;
+  if (starring.has(key)) return;
+  const entry = libraryEntry(type, it);
+  if (entry) return removeItem(entry.kind, entry.id);
+  const title = it.title || it.name;
+  starring.add(key); drawExploreGrid();
+  try {
+    await addFromTmdb(type, it.id);
+    toast(`Added ${title}.`);
+  } catch (e) {
+    toast(e.message === "notfound" ? `Couldn't find episode info for ${title}. Try Add show on My Shows.` : `Couldn't add ${title}. Check your connection.`);
+  }
+  starring.delete(key); drawExploreGrid();
 }
 // Episode tracking uses TVMaze; match the TMDB show to it.
 async function findOnTvMaze(d, title, year) {
@@ -1045,9 +1130,8 @@ function showMenu(id) {
     };
     m.querySelector('[data-a="remove"]').onclick = () => {
       close();
-      const backup = db.shows[id];
-      delete db.shows[id]; saveDb(); go("/");
-      toast(`Removed ${backup.name}.`, "Undo", () => { db.shows[id] = backup; saveDb(); render(); });
+      go("/");
+      removeItem("show", id);
     };
   });
 }
